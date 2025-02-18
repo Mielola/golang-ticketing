@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware memeriksa token OTP di header Authorization
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Ambil token dari header Authorization

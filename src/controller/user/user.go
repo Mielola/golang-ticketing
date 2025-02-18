@@ -1,9 +1,12 @@
 package user
 
 import (
+	"bytes"
 	"fmt"
+	"html/template"
 	"log"
 	"math/rand"
+	"my-gin-project/src/controller/email"
 	"my-gin-project/src/types"
 	"net/http"
 	"strconv"
@@ -26,28 +29,10 @@ func InitDB() {
 	fmt.Println("Connected to MySQL")
 }
 
-func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Ambil token dari header Authorization
-		token := c.GetHeader("Authorization")
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing token"})
-			c.Abort()
-			return
-		}
-
-		// Periksa apakah OTP ada di database
-		var user types.User
-		if err := DB.Where("OTP = ?", token).First(&user).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid or expired token"})
-			c.Abort()
-			return
-		}
-
-		// Simpan informasi user dalam context untuk digunakan di endpoint lain
-		c.Set("user", user)
-		c.Next()
-	}
+func generateOTP() string {
+	rand.Seed(time.Now().UnixNano())
+	otp := rand.Intn(999999-100000) + 100000
+	return strconv.Itoa(otp)
 }
 
 // @GET Users
@@ -55,36 +40,22 @@ func GetAllUsers(c *gin.Context) {
 	var users []types.UserResponse
 	tableName := "users"
 
-	// Ambil parameter query 'shift_date' yang diberikan oleh admin
 	shiftDate := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
 
-	// Query dasar
 	query := DB.Table(tableName).
 		Select("users.id, users.name, users.email, users.password, users.role, users.status, users.OTP, shifts.shift_name").
 		Joins("JOIN employee_shifts ON users.email = employee_shifts.user_email").
 		Joins("JOIN shifts ON employee_shifts.shift_id = shifts.id")
 
-	// if err := DB.Table(tableName).
-	// 	Select("users.email, users.name, users.status, users.role, shifts.shift_name").
-	// 	Joins("JOIN employee_shifts ON users.email = employee_shifts.user_email").
-	// 	Joins("JOIN shifts ON employee_shifts.shift_id = shifts.id").
-	// 	Find(&users).Error; err != nil {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	// 	return
-	// }
-
-	// Jika ada parameter 'shift_date', filter berdasarkan tanggal tersebut
 	if shiftDate != "" {
 		query = query.Where("employee_shifts.shift_date = ?", shiftDate)
 	}
 
-	// Eksekusi query
 	if err := query.Group("users.id").Order("users.id").Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Kirimkan respons dengan data yang ditemukan
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "All users retrieved successfully",
@@ -92,38 +63,142 @@ func GetAllUsers(c *gin.Context) {
 	})
 }
 
-func generateOTP() string {
-	rand.Seed(time.Now().UnixNano())
-	otp := rand.Intn(999999-100000) + 100000 // generates a 6-digit OTP
-	return strconv.Itoa(otp)
-}
-
 // @POST Login
 func Login(c *gin.Context) {
 	var users types.UserBody
+
 	if err := c.ShouldBindJSON(&users); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	var existingOTP string
+	if err := DB.Table("users").Select("OTP").Where("email = ? AND OTP IS NOT NULL", users.Email).Scan(&existingOTP).Error; err == nil && existingOTP != "" {
+
+		// Save History Logout
+		if err := DB.Table("user_logs").
+			Where("user_email = ? AND logout_time IS NULL", users.Email).
+			Order("login_time DESC").
+			Limit(1).
+			Updates(map[string]interface{}{
+				"logout_time": time.Now(),
+			}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log out user", "details": err.Error()})
+			return
+		}
+
+		// Change Status to Offline
+		if err := DB.Table("users").Where("email = ?", users.Email).Update("status", "offline").Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user status", "details": err.Error()})
+			return
+		}
+
+		// Clear Existing OTP
+		if err := DB.Table("users").Where("email = ?", users.Email).Update("OTP", nil).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear existing OTP", "details": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "User is already logged in with an active OTP. Logged out successfully."})
+		return
+
+	}
+
 	var user types.User
 	if err := DB.Where("email = ? AND password = ?", users.Email, users.Password).First(&user).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "User not found"})
+		c.JSON(http.StatusNotFound, gin.H{"message": "Email or password is incorrect"})
 		return
 	}
 
-	// Update status user menjadi online
 	status := "online"
 	user.Status = &status
 
-	// Generate dan update OTP
 	otp := generateOTP()
 	user.OTP = &otp
 	user.UpdatedAt = time.Now()
 
-	// Simpan perubahan status dan OTP dengan logging error
+	htmlTemplate := `
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>OTP Verification</title>
+			<style>
+				body {
+					font-family: 'Arial', sans-serif;
+					background-color: #f4f4f9;
+					color: #333;
+					margin: 0;
+					padding: 0;
+				}
+				.container {
+					width: 100%;
+					max-width: 600px;
+					margin: 0 auto;
+					background-color: #ffffff;
+					padding: 20px;
+					border-radius: 8px;
+					box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+				}
+				h1 {
+					color: #5A9D5E;
+					text-align: center;
+				}
+				p {
+					font-size: 16px;
+					line-height: 1.6;
+					text-align: center;
+				}
+				.otp {
+					font-size: 24px;
+					font-weight: bold;
+					color: #5A9D5E;
+					text-align: center;
+					margin: 20px 0;
+				}
+				.footer {
+					text-align: center;
+					font-size: 12px;
+					color: #777;
+					margin-top: 20px;
+				}
+			</style>
+		</head>
+		<body>
+			<div class="container">
+				<h1>OTP Verification</h1>
+				<p>Your One-Time Password (OTP) for login is:</p>
+				<div class="otp">{{.otp}}</div>
+				<p>Please use this OTP to complete your login process. This OTP is valid for 10 minutes.</p>
+				<div class="footer">
+					<p>Thank you for using our service!</p>
+				</div>
+			</div>
+		</body>
+		</html>
+	`
+
+	tmpl, err := template.New("email").Parse(htmlTemplate)
+	if err != nil {
+		return
+	}
+
+	data := map[string]string{
+		"otp": otp,
+	}
+
+	var bodyBuffer bytes.Buffer
+	if err := tmpl.Execute(&bodyBuffer, data); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute email template", "details": err.Error()})
+		return
+	}
+
+	if err := email.SendEmail(c, "mwildab16@gmail.com", "Login OTP", bodyBuffer.String()); err != nil {
+		return
+	}
+
 	if err := DB.Save(&user).Error; err != nil {
-		fmt.Printf("Error saving user: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Failed to update user OTP",
 			"error":   err.Error(),
@@ -131,53 +206,47 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	loginTime := types.LoginTime{
-        Email: users.Email,
-        Login: time.Now(),
-    }
-
-    // Insert the login time into the login_time table
-    if err := DB.Create(&loginTime).Error; err != nil {
-        fmt.Printf("Error logging login time: %v\n", err)
-        c.JSON(http.StatusInternalServerError, gin.H{
-            "message": "Failed to log login time",
-            "error":   err.Error(),
-        })
-        return
-    }
-
-	// Response seperti sebelumnya
-	response := types.UserResponse{
-		Email:  user.Email,
-		Name:   user.Name,
-		Status: *user.Status,
-		Role:   user.Role,
-		OTP:    user.OTP,
+	LoginRecord := struct {
+		UserEmail string    `json:"user_email"`
+		LoginTime time.Time `json:"login_time"`
+		Otp       string    `json:"OTP"`
+	}{
+		UserEmail: users.Email,
+		LoginTime: time.Now(),
+		Otp:       otp,
 	}
 
-	// Ambil shift yang berlaku pada tanggal saat ini
-	var shifts []string
+	if err := DB.Table("user_logs").Create(&LoginRecord).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+
+			"message": "Failed to create login record",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	response := types.UserResponse{
+		Email: user.Email,
+		Name:  user.Name,
+		Role:  user.Role,
+	}
+
+	var shifts struct {
+		ShiftName string `json:"shift_name"`
+	}
 	currentDate := time.Now().Format("2006-01-02")
+
 	if err := DB.Table("shifts").
 		Select("shifts.shift_name").
 		Joins("JOIN employee_shifts ON shifts.id = employee_shifts.shift_id").
 		Where("employee_shifts.user_email = ? AND employee_shifts.shift_date = ?", user.Email, currentDate).
-		Pluck("shifts.shift_name", &shifts).Error; err != nil {
+		Scan(&shifts).Error; err != nil {
 		fmt.Printf("Error fetching shifts: %v\n", err)
 	}
 
-	// Jika ada shifts, set shift default
-	if len(shifts) > 0 {
-		response.ShiftName = &shifts[0]
+	if shifts.ShiftName != "" {
+		response.ShiftName = &shifts.ShiftName
 	}
-
-	// if response.ShiftName == nil {
-	// 	c.JSON(http.StatusNotFound, gin.H{
-	// 		"status":  false,
-	// 		"message": "Bukan Shift Anda",
-	// 	})
-	// 	return
-	// }
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  true,
@@ -186,79 +255,72 @@ func Login(c *gin.Context) {
 	})
 }
 
-
+// @POST Logout
 func Logout(c *gin.Context) {
-    var users types.UserResponse
-    if err := c.ShouldBindJSON(&users); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-        return
-    }
+	email := c.Query("email")
 
-    // Find the user by email and verify the OTP
-    var user types.User
-    if err := DB.Where("email = ? AND otp = ?", users.Email, users.OTP).First(&user).Error; err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"message": "Invalid email or OTP"})
-        return
-    }
+	if email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Email is required"})
+		return
+	}
 
-    // Update user status to 'offline' and clear OTP
-    status := "offline"
-    user.Status = &status
-    user.OTP = nil // Clear OTP after logout
-    user.UpdatedAt = time.Now()
+	// Struktur untuk menampung hasil query
+	var userInfo struct {
+		Status    string
+		ShiftName string
+	}
 
-    // Save user status change
-    if err := DB.Save(&user).Error; err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{
-            "message": "Failed to update user status",
-            "error":   err.Error(),
-        })
-        return
-    }
+	// Query untuk mengambil status dan shift_name dari tabel shifts
+	if err := DB.Table("users").
+		Select("users.status, shifts.shift_name").
+		Joins("JOIN employee_shifts ON users.email = employee_shifts.user_email").
+		Joins("JOIN shifts ON employee_shifts.shift_id = shifts.id").
+		Where("users.email = ?", email).
+		Scan(&userInfo).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to fetch user status"})
+		return
+	}
 
-    // Record logout time in the login_time table
-    logoutTime := time.Now()
-    var loginTimeRecord types.LoginTime
+	if userInfo.Status != "online" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "User cannot log out, status is not 'online'"})
+		return
+	}
 
-    // Check if a record already exists for this user
-    if err := DB.Where("email = ?", users.Email).First(&loginTimeRecord).Error; err != nil {
-        // If no record exists, create a new one with login and logout times
-        loginTimeRecord = types.LoginTime{
-            Email: users.Email,
-            Login: user.UpdatedAt, // Assuming the last updated time is when the user logged in
-            Logout: &logoutTime,
-        }
+	var user types.User
+	if err := DB.Where("email = ?", email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "User not found"})
+		return
+	}
 
-        if err := DB.Create(&loginTimeRecord).Error; err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{
-                "message": "Failed to record logout time",
-                "error":   err.Error(),
-            })
-            return
-        }
-    } else {
-        // If a record exists, update the logout time
-        loginTimeRecord.Logout = &logoutTime
-        if err := DB.Save(&loginTimeRecord).Error; err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{
-                "message": "Failed to update logout time",
-                "error":   err.Error(),
-            })
-            return
-        }
-    }
+	status := "offline"
+	user.Status = &status
+	user.OTP = nil
+	if err := DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update user status"})
+		return
+	}
 
-    // Send a success response
-    c.JSON(http.StatusOK, gin.H{
-        "message": "Logout successful",
-        "email":   users.Email,
-    })
+	if err := DB.Table("user_logs").
+		Where("user_email = ? AND logout_time IS NULL", user.Email).
+		Order("login_time DESC").
+		Limit(1).
+		Updates(map[string]interface{}{
+			"logout_time": time.Now(),
+			"shift_name":  userInfo.ShiftName,
+		}).Error; err != nil {
+		fmt.Printf("Error logging user logout: %v\n", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"message":   "User logged out successfully",
+		"shiftName": userInfo.ShiftName,
+	})
 }
 
-
-// @POST Users
+// @POST Rehistrasi
 func Registration(c *gin.Context) {
-	var users types.User
+	var users types.UserPost
 
 	if err := c.ShouldBindJSON(&users); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -275,7 +337,7 @@ func Registration(c *gin.Context) {
 		users.Status = &defaultStatus // Assign pointer to default value
 	}
 
-	if err := DB.Create(&users).Error; err != nil {
+	if err := DB.Table("users").Create(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

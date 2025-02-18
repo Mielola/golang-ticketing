@@ -3,7 +3,7 @@ package types
 import "time"
 
 // --------------------------------------------
-// @ Ticket Model
+// @ Ticket Type
 // --------------------------------------------
 type Tickets struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
@@ -12,24 +12,23 @@ type Tickets struct {
 	WaktuMasuk      string     `json:"waktu_masuk"`
 	HariRespon      string     `json:"hari_respon,omitempty"`
 	WaktuRespon     string     `json:"waktu_respon,omitempty"`
-	NamaAdmin       string     `json:"nama_admin,omitempty"`
-	Email           string     `json:"email"`
+	UserName        string     `json:"user_name,omitempty"`
+	UserEmail       string     `json:"user_email"`
 	Category        string     `json:"category"`
 	Priority        string     `json:"priority"`
 	Status          string     `json:"status"`
 	Subject         string     `json:"subject"`
 	DetailKendala   string     `json:"detail_kendala"`
 	Owner           string     `json:"owner"`
-	TimeWorked      *int       `json:"time_worked,omitempty"` // Menggunakan pointer untuk mendukung null
-	DueDate         *time.Time `json:"due_date,omitempty"`    // Menggunakan pointer untuk mendukung null
-	KategoriMasalah string     `json:"kategori_masalah,omitempty"`
+	TimeWorked      *int       `json:"time_worked,omitempty"`
+	DueDate         *time.Time `json:"due_date,omitempty"`
 	ResponDiberikan string     `json:"respon_diberikan,omitempty"`
 	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // --------------------------------------------
-// @ User Model
+// @ User Type
 // --------------------------------------------
 
 type User struct {
@@ -44,13 +43,22 @@ type User struct {
 	CreatedAt      time.Time `json:"created_at"`
 	Role           string    `json:"role"`
 }
+type UserPost struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	Name           string    `json:"name"`
+	Email          string    `json:"email"`
+	Password       string    `json:"password"`
+	PasswordRetype string    `json:"password_retype" gorm:"-"`
+	Status         *string   `json:"status"`
+	OTP            *string   `json:"OTP"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	CreatedAt      time.Time `json:"created_at"`
+}
 type UserResponse struct {
 	Email     string  `json:"email"`
 	Name      string  `json:"name"`
-	Status    string  `json:"status"`
 	Role      string  `json:"role"`
 	ShiftName *string `json:"shift_name"`
-	OTP       *string `json:"OTP,omitempty"`
 }
 
 type UserBody struct {
@@ -59,7 +67,7 @@ type UserBody struct {
 }
 
 // --------------------------------------------
-// @ Note Model
+// @ Note Type
 // --------------------------------------------
 
 type NoteBody struct {
@@ -87,8 +95,50 @@ type NoteResponse struct {
 	Notes []NoteDetail `json:"notes"`
 }
 
+// --------------------------------------------
+// @ Shift Type
+// --------------------------------------------
+
+type Shift struct {
+	ID        uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	ShiftName string `json:"shift_name" gorm:"type:varchar(100);not null"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+}
+
+type EmployeeShift struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	UserEmail string `json:"user_email"`
+	ShiftID   uint   `json:"shift_id"`
+	ShiftDate string `json:"shift_date"`
+}
+
+type ShiftRequest struct {
+	UserEmail string `json:"user_email" binding:"required"`
+	ShiftID   string `json:"shift_id"`
+	ShiftDate string `json:"shift_date"`
+	Reason    string `json:"reason"`
+}
+
+type ShiftResponse struct {
+	ID        uint   `json:"id"`
+	UserEmail string `json:"user_email"`
+	ShiftName string `json:"shift_name"`
+	ShiftDate string `json:"shift_date"`
+}
+
+type ShiftLogs struct {
+	ID        uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	UserEmail string `json:"user_email"`
+	ShiftID   uint   `json:"shift_id"`
+	ShiftDate string `json:"shift_date"`
+	Reason    string `json:"reason"`
+}
+
+// --------------------------------------------
+// @ Login Type
+// --------------------------------------------
 type LoginTime struct {
-	Email string       `json:"email"`
-	Login  time.Time   `json:"Login"`
-	Logout  *time.Time `json:"Logout"`
+	Email string    `json:"email"`
+	Login time.Time `json:"Login"`
 }

@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"os"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,12 +17,12 @@ var DB *gorm.DB
 
 func InitDB() {
 	var err error
-	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := fmt.Sprintf("root:@tcp(%s:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local", os.Getenv("DB_HOST"))
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("could not connect to the database: %v", err)
 	}
-	fmt.Println("Connected to MySQL")
+	fmt.Println("DB_HOST:", os.Getenv("DB_HOST"))
 }
 
 // --------------------------------------------

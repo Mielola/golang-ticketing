@@ -18,7 +18,7 @@ func main() {
 
 	// ✅ Tambahkan Middleware CORS
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://db:4200"}, // Ganti dengan URL FE-mu
+		AllowOrigins:     []string{"http://localhost:4200"}, // Ganti dengan URL FE-mu
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,

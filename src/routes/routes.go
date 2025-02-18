@@ -18,8 +18,9 @@ func SetupRoutes(r *gin.Engine) {
 	// @ Public routes
 	// --------------------------------------------
 
-	v1.POST("/login", user.Login)
+	v1.POST("/login", user.SendOTP)
 	v1.POST("/register", user.Registration)
+	v1.POST("/verify-otp", user.VerifyOTP)
 
 	protected_V1 := v1.Group("/")
 	protected_V1.Use(middleware.AuthMiddleware())

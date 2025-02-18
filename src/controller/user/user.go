@@ -63,8 +63,8 @@ func GetAllUsers(c *gin.Context) {
 	})
 }
 
-// @POST Login
-func Login(c *gin.Context) {
+// @POST Send OTP
+func SendOTP(c *gin.Context) {
 	var users types.UserBody
 
 	if err := c.ShouldBindJSON(&users); err != nil {
@@ -72,156 +72,114 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	var existingOTP string
-	if err := DB.Table("users").Select("OTP").Where("email = ? AND OTP IS NOT NULL", users.Email).Scan(&existingOTP).Error; err == nil && existingOTP != "" {
-
-		// Save History Logout
-		if err := DB.Table("user_logs").
-			Where("user_email = ? AND logout_time IS NULL", users.Email).
-			Order("login_time DESC").
-			Limit(1).
-			Updates(map[string]interface{}{
-				"logout_time": time.Now(),
-			}).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log out user", "details": err.Error()})
-			return
-		}
-
-		// Change Status to Offline
-		if err := DB.Table("users").Where("email = ?", users.Email).Update("status", "offline").Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user status", "details": err.Error()})
-			return
-		}
-
-		// Clear Existing OTP
-		if err := DB.Table("users").Where("email = ?", users.Email).Update("OTP", nil).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear existing OTP", "details": err.Error()})
-			return
-		}
-
-		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "User is already logged in with an active OTP. Logged out successfully."})
-		return
-
-	}
-
+	// Validasi Email dan Password
 	var user types.User
 	if err := DB.Where("email = ? AND password = ?", users.Email, users.Password).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "Email or password is incorrect"})
 		return
 	}
 
-	status := "online"
-	user.Status = &status
-
 	otp := generateOTP()
 	user.OTP = &otp
 	user.UpdatedAt = time.Now()
 
-	htmlTemplate := `
-		<!DOCTYPE html>
-		<html>
-		<head>
-			<meta charset="UTF-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<title>OTP Verification</title>
-			<style>
-				body {
-					font-family: 'Arial', sans-serif;
-					background-color: #f4f4f9;
-					color: #333;
-					margin: 0;
-					padding: 0;
-				}
-				.container {
-					width: 100%;
-					max-width: 600px;
-					margin: 0 auto;
-					background-color: #ffffff;
-					padding: 20px;
-					border-radius: 8px;
-					box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-				}
-				h1 {
-					color: #5A9D5E;
-					text-align: center;
-				}
-				p {
-					font-size: 16px;
-					line-height: 1.6;
-					text-align: center;
-				}
-				.otp {
-					font-size: 24px;
-					font-weight: bold;
-					color: #5A9D5E;
-					text-align: center;
-					margin: 20px 0;
-				}
-				.footer {
-					text-align: center;
-					font-size: 12px;
-					color: #777;
-					margin-top: 20px;
-				}
-			</style>
-		</head>
-		<body>
-			<div class="container">
-				<h1>OTP Verification</h1>
-				<p>Your One-Time Password (OTP) for login is:</p>
-				<div class="otp">{{.otp}}</div>
-				<p>Please use this OTP to complete your login process. This OTP is valid for 10 minutes.</p>
-				<div class="footer">
-					<p>Thank you for using our service!</p>
-				</div>
+	htmlTemplate := `<!DOCTYPE html>
+	<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>OTP Verification</title>
+		<style>
+			body { font-family: 'Arial', sans-serif; background-color: #f4f4f9; color: #333; }
+			.container { width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+			h1 { color: #5A9D5E; text-align: center; }
+			p { font-size: 16px; text-align: center; }
+			.otp { font-size: 24px; font-weight: bold; color: #5A9D5E; text-align: center; margin: 20px 0; }
+			.footer { text-align: center; font-size: 12px; color: #777; margin-top: 20px; }
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>OTP Verification</h1>
+			<p>Your One-Time Password (OTP) for login is:</p>
+			<div class="otp">{{.otp}}</div>
+			<p>Please use this OTP to complete your login process. This OTP is valid for 10 minutes.</p>
+			<div class="footer">
+				<p>Thank you for using our service!</p>
 			</div>
-		</body>
-		</html>
-	`
+		</div>
+	</body>
+	</html>`
 
 	tmpl, err := template.New("email").Parse(htmlTemplate)
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse email template"})
 		return
 	}
 
-	data := map[string]string{
-		"otp": otp,
-	}
-
+	data := map[string]string{"otp": otp}
 	var bodyBuffer bytes.Buffer
 	if err := tmpl.Execute(&bodyBuffer, data); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute email template", "details": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute email template"})
 		return
 	}
 
-	if err := email.SendEmail(c, "mwildab16@gmail.com", "Login OTP", bodyBuffer.String()); err != nil {
+	if err := email.SendEmail(c, user.Email, "Login OTP", bodyBuffer.String()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send OTP email"})
 		return
 	}
 
 	if err := DB.Save(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to update user OTP",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update user OTP", "error": err.Error()})
 		return
 	}
 
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "OTP sent to email",
+	})
+}
+
+// @POST Verify OTP
+func VerifyOTP(c *gin.Context) {
+	var req struct {
+		Email string `json:"email"`
+		OTP   string `json:"otp"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user types.User
+	if err := DB.Where("email = ? AND OTP = ?", req.Email, req.OTP).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid OTP"})
+		return
+	}
+
+	// Reset OTP setelah verifikasi berhasil
+	user.OTP = nil
+	status := "online"
+	user.Status = &status
+	user.UpdatedAt = time.Now()
+
+	if err := DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update user status", "error": err.Error()})
+		return
+	}
+
+	// Buat record login
 	LoginRecord := struct {
 		UserEmail string    `json:"user_email"`
 		LoginTime time.Time `json:"login_time"`
-		Otp       string    `json:"OTP"`
 	}{
-		UserEmail: users.Email,
+		UserEmail: req.Email,
 		LoginTime: time.Now(),
-		Otp:       otp,
 	}
 
 	if err := DB.Table("user_logs").Create(&LoginRecord).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-
-			"message": "Failed to create login record",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to create login record"})
 		return
 	}
 
@@ -231,6 +189,7 @@ func Login(c *gin.Context) {
 		Role:  user.Role,
 	}
 
+	// Cek shift saat ini
 	var shifts struct {
 		ShiftName string `json:"shift_name"`
 	}
@@ -250,7 +209,7 @@ func Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  true,
-		"message": "User found",
+		"message": "User verified",
 		"user":    response,
 	})
 }

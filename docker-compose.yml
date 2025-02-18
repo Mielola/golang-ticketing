@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: golang-ticketing-backend
     environment:
-      - DB_HOST=db
+      - DB_HOST=golang-ticketing-db
       - DB_PORT=3306
       - DB_USER=root
       - DB_PASSWORD=
@@ -49,4 +49,4 @@ volumes:
 
 networks:
   ticketing-network:
-    driver: bridge
+    external: true

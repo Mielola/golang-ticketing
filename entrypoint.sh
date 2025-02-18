@@ -1,15 +1,19 @@
 #!/bin/bash
 
-# Tunggu MySQL tersedia
-until mysqladmin ping -h"$DB_HOST" --silent; do
-  echo "Waiting for database connection..."
-  sleep 2
+# Menunggu database siap (opsional, tergantung setup)
+until mysql -h db -u root -p"$MYSQL_PASSWORD" -e "show databases" > /dev/null 2>&1; do
+    echo "Waiting for database to be ready..."
+    sleep 2
 done
 
-# Jalankan migrasi database
-echo "Running database migrations..."
-/app/migrate -path ./db/migrations -database "mysql://${DB_USER}:${DB_PASSWORD}@tcp(${DB_HOST}:${DB_PORT})/${DB_NAME}" up
+# Menjalankan migrasi jika ada
+if [ -f "/app/migrate" ]; then
+    echo "Running database migrations..."
+    /usr/local/bin/migrate -path /app/migrations -database "mysql://root:$MYSQL_PASSWORD@tcp(db:3306)/commandcenter" up
+else
+    echo "Migrate tool not found, skipping migrations."
+fi
 
-# Jalankan aplikasi
-echo "Starting backend service..."
-exec "$@"
+# Menjalankan aplikasi utama
+echo "Starting application..."
+/app/main

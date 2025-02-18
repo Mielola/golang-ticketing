@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"my-gin-project/src/types"
 
@@ -21,7 +22,7 @@ func InitDB() {
 	if err != nil {
 		log.Fatalf("could not connect to the database: %v", err)
 	}
-	fmt.Println("Connected to MySQL")
+	fmt.Println("DB_HOST:", os.Getenv("DB_HOST"))
 }
 
 // --------------------------------------------

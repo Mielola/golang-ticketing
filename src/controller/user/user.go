@@ -21,7 +21,7 @@ var DB *gorm.DB
 
 func InitDB() {
 	var err error
-	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("could not connect to the database: %v", err)
@@ -60,6 +60,27 @@ func GetAllUsers(c *gin.Context) {
 		"success": true,
 		"message": "All users retrieved successfully",
 		"data":    users,
+	})
+}
+
+// @GET Users
+func GetUsersById(c *gin.Context) {
+	var response types.UserResponse
+	userID := c.Param("id")
+
+	query := DB.Table("users").Where("id = ?", userID).First(&response)
+
+	if query.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": query.Error.Error()})
+		return
+	}
+
+	response.Avatar = "images/avatars/brian-hughes.png"
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "User retrieved successfully",
+		"data":    response,
 	})
 }
 
@@ -159,7 +180,6 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	// Reset OTP setelah verifikasi berhasil
-	user.OTP = nil
 	status := "online"
 	user.Status = &status
 	user.UpdatedAt = time.Now()
@@ -184,6 +204,7 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	response := types.UserResponse{
+		ID:    user.ID,
 		Email: user.Email,
 		Name:  user.Name,
 		Role:  user.Role,

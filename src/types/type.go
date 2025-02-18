@@ -55,10 +55,13 @@ type UserPost struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 type UserResponse struct {
+	ID        uint    `json:"id"`
 	Email     string  `json:"email"`
 	Name      string  `json:"name"`
 	Role      string  `json:"role"`
 	ShiftName *string `json:"shift_name"`
+	Avatar    string  `json:"avatar"`
+	Status    string  `json:"status"`
 }
 
 type UserBody struct {

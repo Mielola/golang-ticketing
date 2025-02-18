@@ -1,2 +1,0 @@
-# my-gin-project/src/routes
-src\routes\routes.go:21:25: undefined: user.Login

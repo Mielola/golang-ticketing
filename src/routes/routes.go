@@ -47,6 +47,7 @@ func SetupRoutes(r *gin.Engine) {
 	// Users
 	protected_V1.GET("/users", user.GetAllUsers)
 	protected_V1.POST("/users", user.Registration)
+	v1.GET("/users/:id", user.GetUsersById)
 
 	// Notes
 	protected_V1.GET("/notes", notes.GetAllNotes)

@@ -63,6 +63,27 @@ func GetAllUsers(c *gin.Context) {
 	})
 }
 
+// @GET Users
+func GetUsersById(c *gin.Context) {
+	var response types.UserResponse
+	userID := c.Param("id")
+
+	query := DB.Table("users").Where("id = ?", userID).First(&response)
+
+	if query.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": query.Error.Error()})
+		return
+	}
+
+	response.Avatar = "images/avatars/brian-hughes.png"
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "User retrieved successfully",
+		"data":    response,
+	})
+}
+
 // @POST Send OTP
 func SendOTP(c *gin.Context) {
 	var users types.UserBody
@@ -159,7 +180,6 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	// Reset OTP setelah verifikasi berhasil
-	user.OTP = nil
 	status := "online"
 	user.Status = &status
 	user.UpdatedAt = time.Now()
@@ -184,6 +204,7 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	response := types.UserResponse{
+		ID:    user.ID,
 		Email: user.Email,
 		Name:  user.Name,
 		Role:  user.Role,

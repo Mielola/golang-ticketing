@@ -27,6 +27,7 @@ func main() {
 
 	// Setup routes
 	routes.SetupRoutes(r)
+	r.Static("/storage", "./storage")
 
 	// Menjalankan server
 	r.Run(":8080")

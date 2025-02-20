@@ -34,14 +34,26 @@ type Tickets struct {
 	ResolvedTickets int `json:"resolved_tickets"`
 	TotalTickets    int `json:"total_tickets"`
 }
+type DashboardResponse struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message"`
+	Data    DataContent `json:"data"`
+}
+
+type DataContent struct {
+	Summary       Tickets                  `json:"summary"`
+	RecentTickets []map[string]interface{} `json:"recent_tickets"`
+	UserLogs      []UserLogResponse        `json:"user_logs"`
+}
+
+type UserLogResponse struct {
+	types.UserResponseWithoutToken
+	LoginDate string `json:"login_date"`
+	LoginTime string `json:"login_time"`
+}
 
 func GetDashboard(c *gin.Context) {
 	var tickets Tickets
-
-	// --------------------------------------------
-	// @Get Tickets
-	// --------------------------------------------
-
 	if err := DB.Table("tickets").
 		Select(`
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
@@ -50,29 +62,15 @@ func GetDashboard(c *gin.Context) {
 			COUNT("*") as total_tickets
 		`).
 		Scan(&tickets).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to get dashboard data",
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to get dashboard data", "error": err.Error()})
 		return
 	}
 
-	// Menggunakan slice untuk menampung beberapa tiket
 	var recentTickets []map[string]interface{}
-	if err := DB.Table("tickets").
-		Select(`*`).Order("created_at DESC").Limit(5).Scan(&recentTickets).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to get recent tickets",
-			"error":   err.Error(),
-		})
+	if err := DB.Table("tickets").Select(`*`).Order("created_at DESC").Limit(5).Scan(&recentTickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to get recent tickets", "error": err.Error()})
 		return
 	}
-
-	// --------------------------------------------
-	// @Get User Logs
-	// --------------------------------------------
 
 	var rawLogs []struct {
 		UserEmail string    `json:"user_email"`
@@ -80,7 +78,6 @@ func GetDashboard(c *gin.Context) {
 	}
 
 	var users []types.UserResponseWithoutToken
-
 	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
@@ -94,46 +91,37 @@ func GetDashboard(c *gin.Context) {
 		return
 	}
 
-	// Buat response dengan menggabungkan user info dan log waktu login
-	var response []struct {
-		types.UserResponseWithoutToken
-		LoginDate string `json:"login_date"`
-		LoginTime string `json:"login_time"`
-	}
-
-	// Buat mapping email ke user agar lebih cepat saat pencocokan
 	userMap := make(map[string]types.UserResponseWithoutToken)
 	for _, user := range users {
 		userMap[user.Email] = user
 	}
 
-	// Gabungkan rawLogs dengan userMap
+	var response []UserLogResponse
 	for _, log := range rawLogs {
 		userData, exists := userMap[log.UserEmail]
 		if !exists {
 			continue
 		}
 
-		response = append(response, struct {
-			types.UserResponseWithoutToken
-			LoginDate string `json:"login_date"`
-			LoginTime string `json:"login_time"`
-		}{
+		response = append(response, UserLogResponse{
 			UserResponseWithoutToken: userData,
 			LoginDate:                log.LoginTime.Format("2006-01-02"),
 			LoginTime:                log.LoginTime.Format("15:04:05"),
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Dashboard data retrieved successfully",
-		"data": gin.H{
-			"summary":        tickets,
-			"recent_tickets": recentTickets,
-			"user_logs":      response,
+	// Gunakan struct agar urutan tidak berubah
+	dashboardData := DashboardResponse{
+		Success: true,
+		Message: "Dashboard data retrieved successfully",
+		Data: DataContent{
+			Summary:       tickets,
+			RecentTickets: recentTickets,
+			UserLogs:      response,
 		},
-	})
+	}
+
+	c.JSON(http.StatusOK, dashboardData)
 }
 
 func SetDB(db *gorm.DB) {

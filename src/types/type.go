@@ -72,7 +72,7 @@ type UserResponseWithoutToken struct {
 	Name      string  `json:"name"`
 	Role      string  `json:"role"`
 	ShiftName *string `json:"shift_name"`
-	Avatar    string  `json:"avatar"`
+	Avatar    *string `json:"avatar"`
 	Status    string  `json:"status"`
 }
 

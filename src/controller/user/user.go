@@ -9,6 +9,7 @@ import (
 	"my-gin-project/src/controller/email"
 	"my-gin-project/src/types"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -86,7 +87,7 @@ func GetAllUsers(c *gin.Context) {
 }
 
 // @GET Users
-func GetUsersById(c *gin.Context) {
+func GetProfile(c *gin.Context) {
 	var response types.UserResponseWithoutToken
 	token := c.GetHeader("Authorization")
 	query := DB.Table("users").Where("users.token = ?", token).First(&response)
@@ -114,24 +115,17 @@ func GetUsersById(c *gin.Context) {
 		response.ShiftName = &shifts.ShiftName
 	}
 
-	response.Avatar = "images/avatars/brian-hughes.jpg"
-
-	// Ambil semua cookies dari request
-	cookies := c.Request.Cookies()
-
-	// Buat array untuk menyimpan cookie key-value
-	cookieMap := make(map[string]string)
-
-	// Loop semua cookies yang dikirim oleh FE
-	for _, cookie := range cookies {
-		cookieMap[cookie.Name] = cookie.Value
+	// Avatar Base Url
+	baseURL := "http://localhost:8080/storage/images/"
+	if response.Avatar != nil && *response.Avatar != "" {
+		photoURL := baseURL + *response.Avatar
+		response.Avatar = &photoURL
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "User retrieved successfully",
 		"data":    response,
-		"cookies": cookieMap,
 	})
 }
 
@@ -448,6 +442,69 @@ func Registration(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"status": true, "message": "Users added successfully", "users": users})
+}
+
+// @PUT User Profile
+func EditProfile(c *gin.Context) {
+	var response types.UserResponseWithoutToken
+	token := c.GetHeader("Authorization")
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
+
+	// Cek User Ada atau Tidak
+	if query.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "User Not Found"})
+		return
+	}
+
+	// Struct untuk menangkap inputan form-data
+	var input struct {
+		Name  string `form:"name"`
+		Email string `form:"email"`
+	}
+
+	// Bind form-data (bukan JSON)
+	if err := c.ShouldBind(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	file, err := c.FormFile("avatar")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
+		return
+	}
+
+	allowedExtensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+	ext := filepath.Ext(file.Filename)
+	if !allowedExtensions[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type, allowed types: .jpg, .jpeg, .png"})
+		return
+	}
+
+	filePath := "storage/images/" + file.Filename
+
+	// Simpan file ke folder yang diinginkan
+	if err := c.SaveUploadedFile(file, filePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		return
+	}
+
+	// Update data user di database
+	if err := DB.Table("users").Where("token = ?", token).Updates(map[string]interface{}{
+		"name":   input.Name,
+		"email":  input.Email,
+		"avatar": file.Filename,
+	}).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Respon sukses
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"message":   "Profile updated successfully",
+		"photo_url": file.Filename,
+	})
 }
 
 func init() {

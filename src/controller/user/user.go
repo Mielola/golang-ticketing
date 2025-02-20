@@ -9,8 +9,11 @@ import (
 	"my-gin-project/src/controller/email"
 	"my-gin-project/src/types"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
@@ -21,12 +24,32 @@ var DB *gorm.DB
 
 func InitDB() {
 	var err error
-	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("could not connect to the database: %v", err)
 	}
 	fmt.Println("Connected to MySQL")
+}
+
+var secretKey = []byte("commandcenter-ticketing")
+
+func GenerateToken(username string) (string, error) {
+	// Buat klaim token
+	claims := jwt.MapClaims{
+		"username": username,
+	}
+
+	// Buat token dengan algoritma HMAC
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Tanda tangani token dengan secret key
+	signedToken, err := token.SignedString(secretKey)
+	if err != nil {
+		return "", err
+	}
+
+	return signedToken, nil
 }
 
 func generateOTP() string {
@@ -64,23 +87,109 @@ func GetAllUsers(c *gin.Context) {
 }
 
 // @GET Users
-func GetUsersById(c *gin.Context) {
-	var response types.UserResponse
-	userID := c.Param("id")
-
-	query := DB.Table("users").Where("id = ?", userID).First(&response)
+func GetProfile(c *gin.Context) {
+	var response types.UserResponseWithoutToken
+	token := c.GetHeader("Authorization")
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
 
 	if query.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": query.Error.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": query.Error.Error()})
 		return
 	}
 
-	response.Avatar = "images/avatars/brian-hughes.png"
+	// Cek shift saat ini
+	var shifts struct {
+		ShiftName string `json:"shift_name"`
+	}
+	currentDate := time.Now().Format("2006-01-02")
+
+	if err := DB.Table("shifts").
+		Select("shifts.shift_name").
+		Joins("JOIN employee_shifts ON shifts.id = employee_shifts.shift_id").
+		Where("employee_shifts.user_email = ? AND employee_shifts.shift_date = ?", response.Email, currentDate).
+		Scan(&shifts).Error; err != nil {
+		fmt.Printf("Error fetching shifts: %v\n", err)
+	}
+
+	if shifts.ShiftName != "" {
+		response.ShiftName = &shifts.ShiftName
+	}
+
+	// Avatar Base Url
+	baseURL := "http://localhost:8080/storage/images/"
+	if response.Avatar != nil && *response.Avatar != "" {
+		photoURL := baseURL + *response.Avatar
+		response.Avatar = &photoURL
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "User retrieved successfully",
 		"data":    response,
+	})
+}
+
+// @GET Users Logs
+func GetUsersLogs(c *gin.Context) {
+	var rawLogs []struct {
+		UserEmail string    `json:"user_email"`
+		LoginTime time.Time `json:"login_time"`
+	}
+
+	var users []types.UserResponseWithoutToken
+
+	// Ambil data dari user_logs
+	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Ambil data user dari tabel users yang memiliki log aktivitas
+	if err := DB.Table("users").
+		Select("users.*").
+		Joins("JOIN user_logs ON user_logs.user_email = users.email").
+		Scan(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Buat response dengan menggabungkan user info dan log waktu login
+	var response []struct {
+		types.UserResponseWithoutToken
+		LoginDate string `json:"login_date"`
+		LoginTime string `json:"login_time"`
+	}
+
+	// Buat mapping email ke user agar lebih cepat saat pencocokan
+	userMap := make(map[string]types.UserResponseWithoutToken)
+	for _, user := range users {
+		userMap[user.Email] = user
+	}
+
+	// Gabungkan rawLogs dengan userMap
+	for _, log := range rawLogs {
+		userData, exists := userMap[log.UserEmail]
+		if !exists {
+			// Jika user tidak ditemukan, skip
+			continue
+		}
+
+		response = append(response, struct {
+			types.UserResponseWithoutToken
+			LoginDate string `json:"login_date"`
+			LoginTime string `json:"login_time"`
+		}{
+			UserResponseWithoutToken: userData,
+			LoginDate:                log.LoginTime.Format("2006-01-02"),
+			LoginTime:                log.LoginTime.Format("15:04:05"),
+		})
+	}
+
+	// Kirim response ke client
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "User Logs retrieved successfully",
+		"users":   response,
 	})
 }
 
@@ -178,11 +287,19 @@ func VerifyOTP(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid OTP"})
 		return
 	}
+	// Give Token
+	token, err := GenerateToken(req.OTP)
+	if err != nil {
+		fmt.Println("Error generating token:", err)
+		return
+	}
 
 	// Reset OTP setelah verifikasi berhasil
+	user.OTP = nil
 	status := "online"
 	user.Status = &status
 	user.UpdatedAt = time.Now()
+	user.Token = token
 
 	if err := DB.Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update user status", "error": err.Error()})
@@ -204,10 +321,12 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	response := types.UserResponse{
-		ID:    user.ID,
-		Email: user.Email,
-		Name:  user.Name,
-		Role:  user.Role,
+		ID:     user.ID,
+		Email:  user.Email,
+		Name:   user.Name,
+		Role:   user.Role,
+		Status: *user.Status,
+		Token:  user.Token,
 	}
 
 	// Cek shift saat ini
@@ -323,6 +442,69 @@ func Registration(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"status": true, "message": "Users added successfully", "users": users})
+}
+
+// @PUT User Profile
+func EditProfile(c *gin.Context) {
+	var response types.UserResponseWithoutToken
+	token := c.GetHeader("Authorization")
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
+
+	// Cek User Ada atau Tidak
+	if query.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "User Not Found"})
+		return
+	}
+
+	// Struct untuk menangkap inputan form-data
+	var input struct {
+		Name  string `form:"name"`
+		Email string `form:"email"`
+	}
+
+	// Bind form-data (bukan JSON)
+	if err := c.ShouldBind(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	file, err := c.FormFile("avatar")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
+		return
+	}
+
+	allowedExtensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+	ext := filepath.Ext(file.Filename)
+	if !allowedExtensions[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type, allowed types: .jpg, .jpeg, .png"})
+		return
+	}
+
+	filePath := "storage/images/" + file.Filename
+
+	// Simpan file ke folder yang diinginkan
+	if err := c.SaveUploadedFile(file, filePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		return
+	}
+
+	// Update data user di database
+	if err := DB.Table("users").Where("token = ?", token).Updates(map[string]interface{}{
+		"name":   input.Name,
+		"email":  input.Email,
+		"avatar": file.Filename,
+	}).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Respon sukses
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"message":   "Profile updated successfully",
+		"photo_url": file.Filename,
+	})
 }
 
 func init() {

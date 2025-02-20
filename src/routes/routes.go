@@ -20,6 +20,7 @@ func SetupRoutes(r *gin.Engine) {
 
 	v1.POST("/login", user.SendOTP)
 	v1.POST("/register", user.Registration)
+	v1.GET("/get-profile", user.GetProfile)
 	v1.POST("/verify-otp", user.VerifyOTP)
 
 	protected_V1 := v1.Group("/")
@@ -47,7 +48,8 @@ func SetupRoutes(r *gin.Engine) {
 	// Users
 	protected_V1.GET("/users", user.GetAllUsers)
 	protected_V1.POST("/users", user.Registration)
-	v1.GET("/users/:id", user.GetUsersById)
+	protected_V1.GET("/users-logs", user.GetUsersLogs)
+	protected_V1.POST("edit-profile", user.EditProfile)
 
 	// Notes
 	protected_V1.GET("/notes", notes.GetAllNotes)

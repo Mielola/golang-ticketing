@@ -42,6 +42,7 @@ type User struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	CreatedAt      time.Time `json:"created_at"`
 	Role           string    `json:"role"`
+	Token          string    `json:"token"`
 }
 type UserPost struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
@@ -61,6 +62,17 @@ type UserResponse struct {
 	Role      string  `json:"role"`
 	ShiftName *string `json:"shift_name"`
 	Avatar    string  `json:"avatar"`
+	Status    string  `json:"status"`
+	Token     string  `json:"token"`
+}
+
+type UserResponseWithoutToken struct {
+	ID        uint    `json:"id"`
+	Email     string  `json:"email"`
+	Name      string  `json:"name"`
+	Role      string  `json:"role"`
+	ShiftName *string `json:"shift_name"`
+	Avatar    *string `json:"avatar"`
 	Status    string  `json:"status"`
 }
 

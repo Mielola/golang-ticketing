@@ -3,7 +3,9 @@ package dashboard
 import (
 	"fmt"
 	"log"
+	"my-gin-project/src/types"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
@@ -27,21 +29,24 @@ func init() {
 }
 
 type Tickets struct {
-	OpenTickets    int `json:"open_tickets"`
-	ClosedTickets  int `json:"closed_tickets"`
-	PendingTickets int `json:"pending_tickets"`
-	TotalTickets   int `json:"total_tickets"`
+	OpenTickets     int `json:"open_tickets"`
+	PendingTickets  int `json:"pending_tickets"`
+	ResolvedTickets int `json:"resolved_tickets"`
+	TotalTickets    int `json:"total_tickets"`
 }
 
 func GetDashboard(c *gin.Context) {
 	var tickets Tickets
 
+	// --------------------------------------------
 	// @Get Tickets
+	// --------------------------------------------
+
 	if err := DB.Table("tickets").
 		Select(`
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
-			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as closed_tickets,
-			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as pending_tickets,
+			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
+			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
 			COUNT("*") as total_tickets
 		`).
 		Scan(&tickets).Error; err != nil {
@@ -65,12 +70,68 @@ func GetDashboard(c *gin.Context) {
 		return
 	}
 
+	// --------------------------------------------
+	// @Get User Logs
+	// --------------------------------------------
+
+	var rawLogs []struct {
+		UserEmail string    `json:"user_email"`
+		LoginTime time.Time `json:"login_time"`
+	}
+
+	var users []types.UserResponseWithoutToken
+
+	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	if err := DB.Table("users").
+		Select("users.*").
+		Joins("JOIN user_logs ON user_logs.user_email = users.email").
+		Scan(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Buat response dengan menggabungkan user info dan log waktu login
+	var response []struct {
+		types.UserResponseWithoutToken
+		LoginDate string `json:"login_date"`
+		LoginTime string `json:"login_time"`
+	}
+
+	// Buat mapping email ke user agar lebih cepat saat pencocokan
+	userMap := make(map[string]types.UserResponseWithoutToken)
+	for _, user := range users {
+		userMap[user.Email] = user
+	}
+
+	// Gabungkan rawLogs dengan userMap
+	for _, log := range rawLogs {
+		userData, exists := userMap[log.UserEmail]
+		if !exists {
+			continue
+		}
+
+		response = append(response, struct {
+			types.UserResponseWithoutToken
+			LoginDate string `json:"login_date"`
+			LoginTime string `json:"login_time"`
+		}{
+			UserResponseWithoutToken: userData,
+			LoginDate:                log.LoginTime.Format("2006-01-02"),
+			LoginTime:                log.LoginTime.Format("15:04:05"),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Dashboard data retrieved successfully",
 		"data": gin.H{
 			"summary":        tickets,
 			"recent_tickets": recentTickets,
+			"user_logs":      response,
 		},
 	})
 }

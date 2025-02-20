@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -27,6 +29,26 @@ func InitDB() {
 		log.Fatalf("could not connect to the database: %v", err)
 	}
 	fmt.Println("Connected to MySQL")
+}
+
+var secretKey = []byte("commandcenter-ticketing")
+
+func GenerateToken(username string) (string, error) {
+	// Buat klaim token
+	claims := jwt.MapClaims{
+		"username": username,
+	}
+
+	// Buat token dengan algoritma HMAC
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Tanda tangani token dengan secret key
+	signedToken, err := token.SignedString(secretKey)
+	if err != nil {
+		return "", err
+	}
+
+	return signedToken, nil
 }
 
 func generateOTP() string {
@@ -65,22 +87,115 @@ func GetAllUsers(c *gin.Context) {
 
 // @GET Users
 func GetUsersById(c *gin.Context) {
-	var response types.UserResponse
-	userID := c.Param("id")
-
-	query := DB.Table("users").Where("id = ?", userID).First(&response)
+	var response types.UserResponseWithoutToken
+	token := c.GetHeader("Authorization")
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
 
 	if query.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": query.Error.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": query.Error.Error()})
 		return
 	}
 
-	response.Avatar = "images/avatars/brian-hughes.png"
+	// Cek shift saat ini
+	var shifts struct {
+		ShiftName string `json:"shift_name"`
+	}
+	currentDate := time.Now().Format("2006-01-02")
+
+	if err := DB.Table("shifts").
+		Select("shifts.shift_name").
+		Joins("JOIN employee_shifts ON shifts.id = employee_shifts.shift_id").
+		Where("employee_shifts.user_email = ? AND employee_shifts.shift_date = ?", response.Email, currentDate).
+		Scan(&shifts).Error; err != nil {
+		fmt.Printf("Error fetching shifts: %v\n", err)
+	}
+
+	if shifts.ShiftName != "" {
+		response.ShiftName = &shifts.ShiftName
+	}
+
+	response.Avatar = "images/avatars/brian-hughes.jpg"
+
+	// Ambil semua cookies dari request
+	cookies := c.Request.Cookies()
+
+	// Buat array untuk menyimpan cookie key-value
+	cookieMap := make(map[string]string)
+
+	// Loop semua cookies yang dikirim oleh FE
+	for _, cookie := range cookies {
+		cookieMap[cookie.Name] = cookie.Value
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "User retrieved successfully",
 		"data":    response,
+		"cookies": cookieMap,
+	})
+}
+
+// @GET Users Logs
+func GetUsersLogs(c *gin.Context) {
+	var rawLogs []struct {
+		UserEmail string    `json:"user_email"`
+		LoginTime time.Time `json:"login_time"`
+	}
+
+	var users []types.UserResponseWithoutToken
+
+	// Ambil data dari user_logs
+	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Ambil data user dari tabel users yang memiliki log aktivitas
+	if err := DB.Table("users").
+		Select("users.*").
+		Joins("JOIN user_logs ON user_logs.user_email = users.email").
+		Scan(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Buat response dengan menggabungkan user info dan log waktu login
+	var response []struct {
+		types.UserResponseWithoutToken
+		LoginDate string `json:"login_date"`
+		LoginTime string `json:"login_time"`
+	}
+
+	// Buat mapping email ke user agar lebih cepat saat pencocokan
+	userMap := make(map[string]types.UserResponseWithoutToken)
+	for _, user := range users {
+		userMap[user.Email] = user
+	}
+
+	// Gabungkan rawLogs dengan userMap
+	for _, log := range rawLogs {
+		userData, exists := userMap[log.UserEmail]
+		if !exists {
+			// Jika user tidak ditemukan, skip
+			continue
+		}
+
+		response = append(response, struct {
+			types.UserResponseWithoutToken
+			LoginDate string `json:"login_date"`
+			LoginTime string `json:"login_time"`
+		}{
+			UserResponseWithoutToken: userData,
+			LoginDate:                log.LoginTime.Format("2006-01-02"),
+			LoginTime:                log.LoginTime.Format("15:04:05"),
+		})
+	}
+
+	// Kirim response ke client
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "User Logs retrieved successfully",
+		"users":   response,
 	})
 }
 
@@ -178,11 +293,19 @@ func VerifyOTP(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid OTP"})
 		return
 	}
+	// Give Token
+	token, err := GenerateToken(req.OTP)
+	if err != nil {
+		fmt.Println("Error generating token:", err)
+		return
+	}
 
 	// Reset OTP setelah verifikasi berhasil
+	user.OTP = nil
 	status := "online"
 	user.Status = &status
 	user.UpdatedAt = time.Now()
+	user.Token = token
 
 	if err := DB.Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update user status", "error": err.Error()})
@@ -204,10 +327,12 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	response := types.UserResponse{
-		ID:    user.ID,
-		Email: user.Email,
-		Name:  user.Name,
-		Role:  user.Role,
+		ID:     user.ID,
+		Email:  user.Email,
+		Name:   user.Name,
+		Role:   user.Role,
+		Status: *user.Status,
+		Token:  user.Token,
 	}
 
 	// Cek shift saat ini

@@ -138,13 +138,11 @@ func GetUsersLogs(c *gin.Context) {
 
 	var users []types.UserResponseWithoutToken
 
-	// Ambil data dari user_logs
 	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	// Ambil data user dari tabel users yang memiliki log aktivitas
 	if err := DB.Table("users").
 		Select("users.*").
 		Joins("JOIN user_logs ON user_logs.user_email = users.email").
@@ -532,18 +530,12 @@ func EditProfile(c *gin.Context) {
 // @POST Edit Status User
 func UpdateStatusUser(c *gin.Context) {
 
-	type UpdateStatusResponse struct {
-		Success bool        `json:"success"`
-		Message string      `json:"message"`
-		Data    interface{} `json:"data"`
-	}
-
 	var input struct {
 		Status string `json:"status"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
 			Data:    nil,
@@ -552,7 +544,7 @@ func UpdateStatusUser(c *gin.Context) {
 	}
 
 	if input.Status == "" {
-		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,
 			Message: "Status is required",
 			Data:    nil,
@@ -561,7 +553,7 @@ func UpdateStatusUser(c *gin.Context) {
 	}
 
 	if input.Status != "online" && input.Status != "offline" {
-		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,
 			Message: "Invalid status",
 			Data:    nil,
@@ -574,7 +566,7 @@ func UpdateStatusUser(c *gin.Context) {
 	query := DB.Table("users").Where("users.token = ?", token).First(&response)
 
 	if query.Error != nil {
-		c.JSON(http.StatusInternalServerError, UpdateStatusResponse{
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: "User Not Found",
 			Data:    nil,
@@ -583,7 +575,7 @@ func UpdateStatusUser(c *gin.Context) {
 	}
 
 	if err := DB.Table("users").Where("token = ?", token).Update("status", input.Status).Scan(&response).Error; err != nil {
-		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
 			Data:    nil,
@@ -598,7 +590,7 @@ func UpdateStatusUser(c *gin.Context) {
 		response.Avatar = &photoURL
 	}
 
-	c.JSON(http.StatusOK, UpdateStatusResponse{
+	c.JSON(http.StatusOK, types.ResponseFormat{
 		Success: true,
 		Message: "Status updated successfully",
 		Data: gin.H{

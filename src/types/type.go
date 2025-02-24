@@ -8,7 +8,7 @@ import "time"
 type Tickets struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
 	TrackingID      string     `json:"tracking_id"`
-	HariMasuk       string     `json:"hari_masuk"`
+	HariMasuk       time.Time  `json:"hari_masuk"`
 	WaktuMasuk      string     `json:"waktu_masuk"`
 	HariRespon      string     `json:"hari_respon,omitempty"`
 	WaktuRespon     string     `json:"waktu_respon,omitempty"`
@@ -192,4 +192,13 @@ type UserLogResponse struct {
 	UserResponseWithoutToken
 	LoginDate string `json:"login_date"`
 	LoginTime string `json:"login_time"`
+}
+
+// --------------------------------------------
+// @ Dashboard Type
+// --------------------------------------------
+type ResponseFormat struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
 }

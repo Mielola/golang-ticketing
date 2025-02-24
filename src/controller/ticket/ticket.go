@@ -28,13 +28,61 @@ func InitDB() {
 
 // @GET
 func GetAllTickets(c *gin.Context) {
-	var migrations []types.Tickets
-	if err := DB.Find(&migrations).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	var tickets []types.Tickets
+	var User struct {
+		Email  string `json:"email"`
+		Name   string `json:""name`
+		Avatar string `json:"avatar"`
+	}
+
+	if err := DB.Find(&tickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to get tickets",
+			Data:    nil,
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "All tickets retrieved successfully", "data": migrations})
+	if err := DB.Table("users").Select("*").Joins("JOIN tickets ON tickets.user_email = users.email").Scan(&User).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to get user",
+			Data:    nil,
+		})
+		return
+	}
+
+	baseURL := "http://localhost:8080/storage/images/"
+	if User.Avatar != "" {
+		User.Avatar = baseURL + User.Avatar
+	}
+
+	var formattedTickets []map[string]interface{}
+	for _, ticket := range tickets {
+		formattedTickets = append(formattedTickets, map[string]interface{}{
+			"id":             ticket.ID,
+			"tracking_id":    ticket.TrackingID,
+			"hari_masuk":     ticket.HariMasuk.Format("2006-01-02"), // Format YYYY-MM-DD
+			"waktu_masuk":    ticket.WaktuMasuk,
+			"user":           User,
+			"category":       ticket.Category,
+			"priority":       ticket.Priority,
+			"status":         ticket.Status,
+			"subject":        ticket.Subject,
+			"detail_kendala": ticket.DetailKendala,
+			"owner":          ticket.Owner,
+			"created_date":   ticket.CreatedAt.Format("2006-01-02"),
+			"created_time":   ticket.CreatedAt.Format("15:04:05"),
+			"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
+		})
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Tickets retrieved successfully",
+		Data:    formattedTickets,
+	})
 }
 
 // @GET

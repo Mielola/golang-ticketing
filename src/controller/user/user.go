@@ -461,7 +461,6 @@ func EditProfile(c *gin.Context) {
 		Email string `form:"email"`
 	}
 
-	// Bind form-data (bukan JSON)
 	if err := c.ShouldBind(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -528,6 +527,84 @@ func EditProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, responseData)
+}
+
+// @POST Edit Status User
+func UpdateStatusUser(c *gin.Context) {
+
+	type UpdateStatusResponse struct {
+		Success bool        `json:"success"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
+	}
+
+	var input struct {
+		Status string `json:"status"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if input.Status == "" {
+		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+			Success: false,
+			Message: "Status is required",
+			Data:    nil,
+		})
+		return
+	}
+
+	if input.Status != "online" && input.Status != "offline" {
+		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+			Success: false,
+			Message: "Invalid status",
+			Data:    nil,
+		})
+		return
+	}
+
+	var response types.UserResponseWithoutRole
+	token := c.GetHeader("Authorization")
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
+
+	if query.Error != nil {
+		c.JSON(http.StatusInternalServerError, UpdateStatusResponse{
+			Success: false,
+			Message: "User Not Found",
+			Data:    nil,
+		})
+		return
+	}
+
+	if err := DB.Table("users").Where("token = ?", token).Update("status", input.Status).Scan(&response).Error; err != nil {
+		c.JSON(http.StatusBadRequest, UpdateStatusResponse{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	// Avatar Base Url
+	baseURL := "http://localhost:8080/storage/images/"
+	if response.Avatar != nil && *response.Avatar != "" {
+		photoURL := baseURL + *response.Avatar
+		response.Avatar = &photoURL
+	}
+
+	c.JSON(http.StatusOK, UpdateStatusResponse{
+		Success: true,
+		Message: "Status updated successfully",
+		Data: gin.H{
+			"user": response,
+		},
+	})
 }
 
 func init() {

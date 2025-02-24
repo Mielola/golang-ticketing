@@ -69,7 +69,7 @@ func GetDashboard(c *gin.Context) {
 		return
 	}
 
-	// Format `hari_masuk` sebelum dikirim ke response
+	// Format response
 	type FormattedRecentTicket struct {
 		Category      int     `json:"category"`
 		CreatedAt     string  `json:"created_at"`

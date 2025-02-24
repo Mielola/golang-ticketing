@@ -31,11 +31,11 @@ func GetAllTickets(c *gin.Context) {
 	var tickets []types.Tickets
 	var User struct {
 		Email  string `json:"email"`
-		Name   string `json:""name`
+		Name   string `json:"name"`
 		Avatar string `json:"avatar"`
 	}
 
-	if err := DB.Find(&tickets).Error; err != nil {
+	if err := DB.Find(&tickets).Order("hari_masuk AND waktu_masuk ASC").Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: "Failed to get tickets",
@@ -248,12 +248,12 @@ func UpdateStatus(c *gin.Context) {
 	// @GET Token from Header
 	token := c.GetHeader("Authorization")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "OTP is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
 		return
 	}
 
 	// @GET User Email from Token
-	if err := DB.Table("users").Select("email").Where("OTP = ?", token).First(&user).Error; err != nil {
+	if err := DB.Table("users").Select("email").Where("token = ?", token).First(&user).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
 		return
 	}

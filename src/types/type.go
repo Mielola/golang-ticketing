@@ -27,6 +27,13 @@ type Tickets struct {
 	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
+type TicketsResponse struct {
+	OpenTickets     int `json:"open_tickets"`
+	PendingTickets  int `json:"pending_tickets"`
+	ResolvedTickets int `json:"resolved_tickets"`
+	TotalTickets    int `json:"total_tickets"`
+}
+
 // --------------------------------------------
 // @ User Type
 // --------------------------------------------
@@ -61,7 +68,7 @@ type UserResponse struct {
 	Name      string  `json:"name"`
 	Role      string  `json:"role"`
 	ShiftName *string `json:"shift_name"`
-	Avatar    string  `json:"avatar"`
+	Avatar    *string `json:"avatar"`
 	Status    string  `json:"status"`
 	Token     string  `json:"token"`
 }
@@ -71,6 +78,14 @@ type UserResponseWithoutToken struct {
 	Email     string  `json:"email"`
 	Name      string  `json:"name"`
 	Role      string  `json:"role"`
+	ShiftName *string `json:"shift_name"`
+	Avatar    *string `json:"avatar"`
+	Status    string  `json:"status"`
+}
+type UserResponseWithoutRole struct {
+	ID        uint    `json:"id"`
+	Email     string  `json:"email"`
+	Name      string  `json:"name"`
 	ShiftName *string `json:"shift_name"`
 	Avatar    *string `json:"avatar"`
 	Status    string  `json:"status"`
@@ -156,4 +171,25 @@ type ShiftLogs struct {
 type LoginTime struct {
 	Email string    `json:"email"`
 	Login time.Time `json:"Login"`
+}
+
+// --------------------------------------------
+// @ Dashboard Type
+// --------------------------------------------
+type DashboardResponse struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message"`
+	Data    DataContent `json:"data"`
+}
+
+type DataContent struct {
+	Summary       TicketsResponse          `json:"summary"`
+	RecentTickets []map[string]interface{} `json:"recent_tickets"`
+	UserLogs      []UserLogResponse        `json:"user_logs"`
+}
+
+type UserLogResponse struct {
+	UserResponseWithoutToken
+	LoginDate string `json:"login_date"`
+	LoginTime string `json:"login_time"`
 }

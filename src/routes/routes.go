@@ -41,6 +41,7 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/tickets/category", ticket.GetTicketsByCategory)
 	protected_V1.GET("/tickets/status", ticket.GetTicketsByStatus)
 	protected_V1.GET("/tickets/priority", ticket.GetTicketsByPriority)
+	protected_V1.GET("/tickets-logs", ticket.GetTicketsLogs)
 
 	// Auth
 	protected_V1.POST("/logout", user.Logout)

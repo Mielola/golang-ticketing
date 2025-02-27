@@ -39,7 +39,7 @@ func GetAllNotes(c *gin.Context) {
 
 	if err := DB.Table("note").
 		Select("note.id, note.title, note.content, users.email, users.name").
-		Joins("JOIN users ON note.user_email = users.email").
+		Joins("LEFT JOIN users ON note.user_email = users.email").
 		Find(&notes).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -25,7 +25,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Periksa apakah OTP ada di database
+		// Periksa apakah Token ada di database
 		var user types.User
 		if err := database.DB.Where("token = ?", token).First(&user).Error; err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid or expired token"})

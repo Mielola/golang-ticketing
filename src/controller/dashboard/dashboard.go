@@ -49,7 +49,7 @@ func GetDashboard(c *gin.Context) {
 	// @ GET Recent Tickets
 	// --------------------------------------------
 	type RecentTicket struct {
-		Category      int        `json:"category"`
+		Category      string     `json:"category_name"`
 		CreatedAt     time.Time  `json:"created_at"`
 		DetailKendala string     `json:"detail_kendala"`
 		DueDate       *time.Time `json:"due_date"`
@@ -61,7 +61,7 @@ func GetDashboard(c *gin.Context) {
 
 	var recentTickets []RecentTicket
 	if err := DB.Table("tickets").
-		Select("category, created_at, detail_kendala, due_date, hari_masuk, waktu_masuk, subject, user_email").
+		Select("category_name, created_at, detail_kendala, due_date, hari_masuk, waktu_masuk, subject, user_email").
 		Order("created_at DESC").
 		Limit(10).
 		Scan(&recentTickets).Error; err != nil {
@@ -71,7 +71,7 @@ func GetDashboard(c *gin.Context) {
 
 	// Format response
 	type FormattedRecentTicket struct {
-		Category      int     `json:"category"`
+		Category      string  `json:"category_name"`
 		CreatedAt     string  `json:"created_at"`
 		DetailKendala string  `json:"detail_kendala"`
 		DueDate       *string `json:"due_date,omitempty"`

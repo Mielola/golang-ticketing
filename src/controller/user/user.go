@@ -293,6 +293,7 @@ func VerifyOTP(c *gin.Context) {
 	}
 
 	// Reset OTP setelah verifikasi berhasil
+	var otpNow = user.OTP
 	user.OTP = nil
 	status := "online"
 	user.Status = &status
@@ -308,13 +309,19 @@ func VerifyOTP(c *gin.Context) {
 	LoginRecord := struct {
 		UserEmail string    `json:"user_email"`
 		LoginTime time.Time `json:"login_time"`
+		OTP       string    `json:"OTP"`
 	}{
-		UserEmail: req.Email,
+		UserEmail: user.Email,
 		LoginTime: time.Now(),
+		OTP:       *otpNow,
 	}
 
 	if err := DB.Table("user_logs").Create(&LoginRecord).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to create login record"})
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
 		return
 	}
 

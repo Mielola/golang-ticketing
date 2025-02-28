@@ -31,7 +31,6 @@ services:
       - ticketing-network
     volumes:
       - db-data:/var/lib/mysql
-      - ./golang-ticketing:/golang-ticketing
 
   nginx:
     image: nginx:latest

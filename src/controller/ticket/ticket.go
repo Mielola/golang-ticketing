@@ -392,13 +392,15 @@ func AddTicket(c *gin.Context) {
 
 	// Save history
 	history := struct {
-		UserEmail string `json:"user_email"`
-		Status    string `json:"status"`
-		TicketsID string `json:"ticket_id"`
+		UserEmail     string `json:"user_email"`
+		NewStatus     string `json:"new_status"`
+		CurrentStatus string `json:"current_status"`
+		TicketsID     string `json:"ticket_id"`
 	}{
-		UserEmail: ticket.UserEmail,
-		Status:    "New",
-		TicketsID: ticket.TrackingID,
+		UserEmail:     ticket.UserEmail,
+		NewStatus:     "New",
+		CurrentStatus: "New",
+		TicketsID:     ticket.TrackingID,
 	}
 
 	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {

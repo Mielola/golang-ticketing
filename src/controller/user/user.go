@@ -138,13 +138,11 @@ func GetUsersLogs(c *gin.Context) {
 
 	var users []types.UserResponseWithoutToken
 
-	// Ambil data dari user_logs
 	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	// Ambil data user dari tabel users yang memiliki log aktivitas
 	if err := DB.Table("users").
 		Select("users.*").
 		Joins("JOIN user_logs ON user_logs.user_email = users.email").
@@ -446,7 +444,7 @@ func Registration(c *gin.Context) {
 
 // @PUT User Profile
 func EditProfile(c *gin.Context) {
-	var response types.UserResponseWithoutToken
+	var response types.UserResponseWithoutRole
 	token := c.GetHeader("Authorization")
 	query := DB.Table("users").Where("users.token = ?", token).First(&response)
 
@@ -456,54 +454,148 @@ func EditProfile(c *gin.Context) {
 		return
 	}
 
-	// Struct untuk menangkap inputan form-data
 	var input struct {
 		Name  string `form:"name"`
 		Email string `form:"email"`
 	}
 
-	// Bind form-data (bukan JSON)
 	if err := c.ShouldBind(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	updateData := map[string]interface{}{}
+
+	if input.Name != "" {
+		updateData["name"] = input.Name
+	}
+	if input.Email != "" {
+		updateData["email"] = input.Email
+	}
+
+	// Cek apakah file avatar dikirimkan
 	file, err := c.FormFile("avatar")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
-		return
+	if err == nil {
+		allowedExtensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+		ext := filepath.Ext(file.Filename)
+
+		if !allowedExtensions[ext] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type, allowed types: .jpg, .jpeg, .png"})
+			return
+		}
+
+		filePath := "storage/images/" + file.Filename
+
+		// Simpan file ke folder
+		if err := c.SaveUploadedFile(file, filePath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+			return
+		}
+
+		// Tambahkan avatar ke updateData hanya jika file dikirim
+		updateData["avatar"] = file.Filename
 	}
 
-	allowedExtensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
-	ext := filepath.Ext(file.Filename)
-	if !allowedExtensions[ext] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type, allowed types: .jpg, .jpeg, .png"})
-		return
-	}
-
-	filePath := "storage/images/" + file.Filename
-
-	// Simpan file ke folder yang diinginkan
-	if err := c.SaveUploadedFile(file, filePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
-		return
-	}
-
-	// Update data user di database
-	if err := DB.Table("users").Where("token = ?", token).Updates(map[string]interface{}{
-		"name":   input.Name,
-		"email":  input.Email,
-		"avatar": file.Filename,
-	}).Error; err != nil {
+	// Perbarui data user di database hanya dengan field yang tersedia
+	if err := DB.Table("users").Where("token = ?", token).Updates(updateData).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	user := DB.Table("users").Where("users.token = ?", token).First(&response).Error
+	if user != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Avatar Base Url
+	baseURL := "http://localhost:8080/storage/images/"
+	if response.Avatar != nil && *response.Avatar != "" {
+		photoURL := baseURL + *response.Avatar
+		response.Avatar = &photoURL
+	}
+
 	// Respon sukses
-	c.JSON(http.StatusOK, gin.H{
-		"success":   true,
-		"message":   "Profile updated successfully",
-		"photo_url": file.Filename,
+	responseData := gin.H{
+		"success": true,
+		"message": "Profile updated successfully",
+		"data": gin.H{
+			"user": &response,
+		},
+	}
+
+	c.JSON(http.StatusOK, responseData)
+}
+
+// @POST Edit Status User
+func UpdateStatusUser(c *gin.Context) {
+
+	var input struct {
+		Status string `json:"status"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if input.Status == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Status is required",
+			Data:    nil,
+		})
+		return
+	}
+
+	if input.Status != "online" && input.Status != "offline" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid status",
+			Data:    nil,
+		})
+		return
+	}
+
+	var response types.UserResponseWithoutRole
+	token := c.GetHeader("Authorization")
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
+
+	if query.Error != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "User Not Found",
+			Data:    nil,
+		})
+		return
+	}
+
+	if err := DB.Table("users").Where("token = ?", token).Update("status", input.Status).Scan(&response).Error; err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	// Avatar Base Url
+	baseURL := "http://localhost:8080/storage/images/"
+	if response.Avatar != nil && *response.Avatar != "" {
+		photoURL := baseURL + *response.Avatar
+		response.Avatar = &photoURL
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Status updated successfully",
+		Data: gin.H{
+			"user": response,
+		},
 	})
 }
 

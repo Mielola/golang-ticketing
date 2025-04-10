@@ -27,11 +27,108 @@ func InitDB() {
 	fmt.Println("Connected to MySQL")
 }
 
+func checkTicketsDeadline() {
+	var tickets []types.TicketsResponseAll
+	var c *gin.Context
+
+	if err := DB.Table("tickets").Select("*").Order("priority DESC").Find(&tickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	for _, ticket := range tickets {
+		var ticketCreator types.TicketsCreator
+
+		if err := DB.Table("users").
+			Select("email, name, avatar").
+			Where("email = ?", ticket.UserEmail).
+			Scan(&ticketCreator).Error; err != nil {
+			return
+		}
+
+		var lastReply struct {
+			UserEmail string    `json:"user_email"`
+			NewStatus string    `json:"new_status"`
+			UpdatedAt time.Time `json:"update_at"`
+		}
+
+		if err := DB.Table("user_tickets").
+			Select("user_email, new_status, update_at").
+			Where("tickets_id = ?", ticket.TrackingID).
+			Order("update_at DESC").
+			Limit(1).
+			Scan(&lastReply).Error; err != nil {
+			lastReply = struct {
+				UserEmail string    `json:"user_email"`
+				NewStatus string    `json:"new_status"`
+				UpdatedAt time.Time `json:"update_at"`
+			}{}
+		}
+
+		if lastReply.UserEmail != "" {
+			var replierInfo struct {
+				Email  string `json:"email"`
+				Name   string `json:"name"`
+				Avatar string `json:"avatar"`
+			}
+
+			if err := DB.Table("users").
+				Select("email, name, avatar").
+				Where("email = ?", lastReply.UserEmail).
+				Scan(&replierInfo).Error; err == nil {
+			}
+		}
+
+		if ticket.Status != "Resolved" && time.Since(ticket.CreatedAt) > 24*time.Hour && ticket.Priority != "High" {
+
+			// Update the ticket's priority to "High"
+			if err := DB.Table("tickets").
+				Where("tracking_id = ?", ticket.TrackingID).
+				Update("priority", "High").Error; err != nil {
+				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+					Success: false,
+					Message: err.Error(),
+					Data:    nil,
+				})
+				return
+			}
+
+			// Save to History
+			saveHistory := struct {
+				UserEmail string `json:"user_email"`
+				NewStatus string `json:"new_status"`
+				TicketsID string `json:"ticket_id"`
+				Priority  string `json:"priority"`
+				Details   string `json:"details"`
+			}{
+				UserEmail: ticketCreator.Email,
+				NewStatus: ticket.Status,
+				TicketsID: ticket.TrackingID,
+				Priority:  "High",
+				Details:   "Mengupdate Prioritas Ticket",
+			}
+
+			if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+					Success: false,
+					Message: err.Error(),
+				})
+				return
+			}
+
+		}
+	}
+}
+
 // @GET
 func GetAllTickets(c *gin.Context) {
 	var tickets []types.TicketsResponseAll
 
-	if err := DB.Table("tickets").Select("*").Order("tickets.created_at DESC").Find(&tickets).Error; err != nil {
+	if err := DB.Table("tickets").Select("*").Order("priority DESC").Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
@@ -101,9 +198,49 @@ func GetAllTickets(c *gin.Context) {
 			}
 		}
 
+		if ticket.Status != "Resolved" && time.Since(ticket.CreatedAt) > 24*time.Hour && ticket.Priority != "High" {
+
+			// Update the ticket's priority to "High"
+			if err := DB.Table("tickets").
+				Where("tracking_id = ?", ticket.TrackingID).
+				Update("priority", "High").Error; err != nil {
+				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+					Success: false,
+					Message: err.Error(),
+					Data:    nil,
+				})
+				return
+			}
+
+			// Save to History
+			saveHistory := struct {
+				UserEmail string `json:"user_email"`
+				NewStatus string `json:"new_status"`
+				TicketsID string `json:"ticket_id"`
+				Priority  string `json:"priority"`
+				Details   string `json:"details"`
+			}{
+				UserEmail: ticketCreator.Email,
+				NewStatus: ticket.Status,
+				TicketsID: ticket.TrackingID,
+				Priority:  "High",
+				Details:   "Mengupdate Prioritas Ticket",
+			}
+
+			if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+					Success: false,
+					Message: err.Error(),
+				})
+				return
+			}
+
+		}
+
 		formattedTickets = append(formattedTickets, map[string]interface{}{
 			"id":             ticket.ID,
 			"tracking_id":    ticket.TrackingID,
+			"products_name":  ticket.ProductsName,
 			"hari_masuk":     ticket.HariMasuk.Format("2006-01-02"),
 			"waktu_masuk":    ticket.WaktuMasuk,
 			"solved_time":    ticket.SolvedTime,
@@ -131,6 +268,7 @@ func GetAllTickets(c *gin.Context) {
 
 // @GET
 func GetTicketsLogs(c *gin.Context) {
+	checkTicketsDeadline()
 	var ticketLogs []types.TicketsLogsRaw
 
 	if err := DB.Table("user_tickets").
@@ -162,11 +300,12 @@ func GetTicketsLogs(c *gin.Context) {
 		}
 
 		formattedLogs = append(formattedLogs, types.TicketsLogs{
-			ID:            log.ID,
-			TicketsId:     log.TicketsId,
-			NewStatus:     log.NewStatus,
-			CurrentStatus: log.CurrentStatus,
-			UpdateAt:      log.UpdateAt,
+			ID:        log.ID,
+			TicketsId: log.TicketsId,
+			NewStatus: log.NewStatus,
+			Priority:  log.Priority,
+			Details:   log.Details,
+			UpdateAt:  log.UpdateAt,
 			UpdateAtString: func() string {
 				if log.UpdateAt != nil {
 					return log.UpdateAt.Format("2006-01-02 15:04:05")
@@ -191,36 +330,133 @@ func GetTicketsLogs(c *gin.Context) {
 
 // @GET
 func GetTicketsByDateRange(c *gin.Context) {
-	var input struct {
-		StartDate time.Time `json:"start_date" binding:"required"`
-		EndDate   time.Time `json:"end_date" binding:"required"`
-	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
 
-	// Validasi JSON input
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+	if startDateStr == "" || endDateStr == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Start date and end date are required",
+			Data:    nil,
+		})
 		return
 	}
 
-	// Validasi rentang tanggal
-	if input.StartDate.After(input.EndDate) {
+	startDate, err := time.Parse("2006-01-02", startDateStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid StartDate format, use YYYY-MM-DD",
+			Data:    nil,
+		})
+		return
+	}
+
+	endDate, err := time.Parse("2006-01-02", endDateStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid EndDate format, use YYYY-MM-DD"})
+		return
+	}
+
+	if startDate.After(endDate) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "StartDate cannot be after EndDate"})
 		return
 	}
 
-	var tickets []types.Tickets
-	// Query ke database
-	if err := DB.Where("hari_masuk BETWEEN ? AND ?", input.StartDate, input.EndDate).Find(&tickets).Error; err != nil {
+	tickets := make([]types.TicketsResponseAll, 0)
+	if err := DB.Table("tickets").Where("hari_masuk BETWEEN ? AND ?", startDate.String(), endDate.String()).Order("tickets.created_at DESC").Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tickets: " + err.Error()})
 		return
 	}
 
-	// Respons
-	c.JSON(http.StatusOK, gin.H{
-		"message":    "Tickets retrieved successfully",
-		"data":       tickets,
-		"total":      len(tickets),
-		"date_range": gin.H{"start_date": input.StartDate, "end_date": input.EndDate},
+	baseURL := "http://localhost:8080/storage/images/"
+	formattedTickets := make([]map[string]interface{}, 0)
+	for _, ticket := range tickets {
+		var ticketCreator types.TicketsCreator
+
+		if err := DB.Table("users").
+			Select("email, name, avatar").
+			Where("email = ?", ticket.UserEmail).
+			Scan(&ticketCreator).Error; err != nil {
+			return
+		}
+
+		if ticketCreator.Avatar != "" {
+			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
+		}
+
+		var lastReply struct {
+			UserEmail string    `json:"user_email"`
+			NewStatus string    `json:"new_status"`
+			UpdatedAt time.Time `json:"update_at"`
+		}
+
+		if err := DB.Table("user_tickets").
+			Select("user_email, new_status, update_at").
+			Where("tickets_id = ?", ticket.TrackingID).
+			Order("update_at DESC").
+			Limit(1).
+			Scan(&lastReply).Error; err != nil {
+			lastReply = struct {
+				UserEmail string    `json:"user_email"`
+				NewStatus string    `json:"new_status"`
+				UpdatedAt time.Time `json:"update_at"`
+			}{}
+		}
+
+		// Get last replier's information
+		var lastReplier *struct {
+			Email  string `json:"email"`
+			Name   string `json:"name"`
+			Avatar string `json:"avatar"`
+		}
+
+		if lastReply.UserEmail != "" {
+			var replierInfo struct {
+				Email  string `json:"email"`
+				Name   string `json:"name"`
+				Avatar string `json:"avatar"`
+			}
+
+			if err := DB.Table("users").
+				Select("email, name, avatar").
+				Where("email = ?", lastReply.UserEmail).
+				Scan(&replierInfo).Error; err == nil {
+
+				if replierInfo.Avatar != "" {
+					replierInfo.Avatar = baseURL + replierInfo.Avatar
+				}
+				lastReplier = &replierInfo
+			}
+		}
+
+		formattedTickets = append(formattedTickets, map[string]interface{}{
+			"id":             ticket.ID,
+			"tracking_id":    ticket.TrackingID,
+			"products_name":  ticket.ProductsName,
+			"hari_masuk":     ticket.HariMasuk.Format("2006-01-02"),
+			"waktu_masuk":    ticket.WaktuMasuk,
+			"solved_time":    ticket.SolvedTime,
+			"user":           ticketCreator,
+			"last_replier":   lastReplier,
+			"category":       ticket.CategoryName,
+			"priority":       ticket.Priority,
+			"status":         ticket.Status,
+			"subject":        ticket.Subject,
+			"no_whatsapp":    ticket.NoWhatsapp,
+			"detail_kendala": ticket.DetailKendala,
+			"pic":            ticket.PIC,
+			"created_date":   ticket.CreatedAt.Format("2006-01-02"),
+			"created_time":   ticket.CreatedAt.Format("15:04:05"),
+			"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
+		})
+	}
+
+	// Kirim respons
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: startDateStr + " to " + endDateStr,
+		Data:    formattedTickets,
 	})
 }
 
@@ -297,6 +533,179 @@ func GetTicketsByPriority(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Tickets retrieved successfully", "data": tickets})
+}
+
+// @GET
+func GenerateReport(c *gin.Context) {
+	var input struct {
+		ProductsName string `json:"products_name" binding:"required"`
+		StartDate    string `json:"start_date" binding:"required"`
+		EndDate      string `json:"end_date" binding:"required"`
+		Status       string `json:"status" binding:"required"`
+		StartTime    string `json:"start_time" binding:"required"`
+		EndTime      string `json:"end_time" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Request must be in JSON format",
+			Data:    nil,
+		})
+		return
+	}
+
+	if _, err := time.Parse("2006-01-02", input.StartDate); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid StartDate format, use YYYY-MM-DD",
+			Data:    nil,
+		})
+		return
+	}
+
+	if _, err := time.Parse("2006-01-02", input.EndDate); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid EndDate format, use YYYY-MM-DD",
+			Data:    nil,
+		})
+		return
+	}
+
+	if input.StartDate == "" || input.EndDate == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Start date, end date, status are required",
+			Data:    nil,
+		})
+		return
+	}
+
+	var tickets []struct {
+		TrackingID      string    `json:"tracking_id"`
+		CreatedAt       time.Time `json:"created_at"`
+		Subject         string    `json:"subject"`
+		HariMasuk       time.Time `json:"hari_masuk"`
+		WaktuMasuk      string    `json:"waktu_masuk"`
+		CategoryName    string    `json:"category_name"`
+		ResponDiberikan string    `json:"respon_diberikan"`
+		Status          string    `json:"status"`
+		Priority        string    `json:"priority"`
+	}
+
+	var chartPriority struct {
+		Low    int `json:"low"`
+		Medium int `json:"medium"`
+		High   int `json:"high"`
+	}
+
+	type PriorityItem struct {
+		Label string `json:"label"`
+		Value int    `json:"value"`
+	}
+
+	var chartCategory []struct {
+		CategoryName string `json:"category_name"`
+		TotalTickets int    `json:"total_tickets"`
+	}
+
+	if err := DB.Table("tickets").
+		Select("COUNT(CASE WHEN priority = 'Low' THEN 1 END) AS low, COUNT(CASE WHEN priority = 'Medium' THEN 1 END) AS medium, COUNT(CASE WHEN priority = 'High' THEN 1 END) AS high").
+		Where("products_name = ?", input.ProductsName).
+		Find(&chartPriority).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if err := DB.Table("category").Select("tickets.category_name, COUNT(*) AS total_tickets").
+		Joins("LEFT JOIN tickets ON category.category_name = tickets.category_name").
+		Where("products_name = ?", input.ProductsName).Group("category_name").
+		Find(&chartCategory).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if input.Status == "all" || input.Status == "All" {
+		if err := DB.Table("tickets").
+			Where("hari_masuk BETWEEN ? AND ? AND products_name = ? AND waktu_masuk BETWEEN ? and ?", input.StartDate, input.EndDate, input.ProductsName, input.StartTime, input.EndTime).
+			Find(&tickets).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+				Success: false,
+				Message: err.Error(),
+				Data:    nil,
+			})
+			return
+		}
+	} else {
+		if err := DB.Table("tickets").
+			Where("hari_masuk BETWEEN ? AND ? AND status = ? AND products_name = ? AND waktu_masuk BETWEEN ? and ?", input.StartDate, input.EndDate, input.Status, input.ProductsName, input.StartTime, input.EndTime).
+			Find(&tickets).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+				Success: false,
+				Message: err.Error(),
+				Data:    nil,
+			})
+			return
+		}
+	}
+
+	priorityItems := []PriorityItem{
+		{Label: "Low", Value: chartPriority.Low},
+		{Label: "Medium", Value: chartPriority.Medium},
+		{Label: "High", Value: chartPriority.High},
+	}
+
+	categoryItems := make([]map[string]interface{}, 0)
+	for _, category := range chartCategory {
+		categoryItems = append(categoryItems, map[string]interface{}{
+			"category_name": category.CategoryName,
+			"total_tickets": category.TotalTickets,
+		})
+	}
+
+	formattedTickets := make([]map[string]interface{}, 0)
+	for _, ticket := range tickets {
+		formattedTickets = append(formattedTickets, map[string]interface{}{
+			"tracking_id":   ticket.TrackingID,
+			"created_at":    ticket.CreatedAt.Format("2006-01-02 15:04:05"),
+			"subject":       ticket.Subject,
+			"respon_admin":  ticket.ResponDiberikan,
+			"hari_masuk":    ticket.HariMasuk.Format("2006-01-02"),
+			"waktu_masuk":   ticket.WaktuMasuk,
+			"category_name": ticket.CategoryName,
+			"status":        ticket.Status,
+			"priority":      ticket.Priority,
+		})
+	}
+
+	type ResponseFormats struct {
+		Success  bool                     `json:"success"`
+		Message  string                   `json:"message"`
+		Products string                   `json:"products_name"`
+		Data     []map[string]interface{} `json:"data"`
+		Chart    interface{}              `json:"chart"`
+	}
+
+	c.JSON(http.StatusOK, ResponseFormats{
+		Success:  true,
+		Message:  "Report generated successfully",
+		Products: input.ProductsName,
+		Data:     formattedTickets,
+		Chart: gin.H{
+			"ChartPriority": priorityItems,
+			"ChartCategory": categoryItems,
+		},
+	})
+
 }
 
 // @POST
@@ -392,15 +801,17 @@ func AddTicket(c *gin.Context) {
 
 	// Save history
 	history := struct {
-		UserEmail     string `json:"user_email"`
-		NewStatus     string `json:"new_status"`
-		CurrentStatus string `json:"current_status"`
-		TicketsID     string `json:"ticket_id"`
+		UserEmail string `json:"user_email"`
+		NewStatus string `json:"new_status"`
+		TicketsID string `json:"ticket_id"`
+		Priority  string `json:"priority"`
+		Details   string `json:"details"`
 	}{
-		UserEmail:     ticket.UserEmail,
-		NewStatus:     "New",
-		CurrentStatus: "New",
-		TicketsID:     ticket.TrackingID,
+		UserEmail: ticket.UserEmail,
+		NewStatus: "New",
+		TicketsID: ticket.TrackingID,
+		Priority:  ticket.Priority,
+		Details:   "Membuat Tiket Baru",
 	}
 
 	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {
@@ -430,10 +841,284 @@ func generateTrackingID(productName string) string {
 	return trackingID
 }
 
+// @GET
+func GetTicketByID(c *gin.Context) {
+	var tickets []types.TicketsResponseAll
+	var historyTickets []types.TicketsLogsRaw
+
+	if err := DB.Table("tickets").Select("*").Order("tickets.created_at DESC").Where("tracking_id = ?", c.Param("tracking_id")).Find(&tickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if err := DB.Table("user_tickets").
+		Select(`
+			user_tickets.*, 
+			users.email as user_email, 
+			users.name as user_name, 
+			users.avatar as user_avatar
+		`).
+		Joins("LEFT JOIN users ON user_tickets.user_email = users.email").
+		Order("user_tickets.update_at DESC").
+		Where("user_tickets.tickets_id = ?", c.Param("tracking_id")).
+		Find(&historyTickets).Error; err != nil {
+
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	baseURL := "http://localhost:8080/storage/images/"
+
+	// Ubah history tiket format
+	var formattedLogs []types.TicketsLogs
+	for _, log := range historyTickets {
+		if log.UserAvatar != "" {
+			log.UserAvatar = baseURL + log.UserAvatar
+		}
+
+		formattedLogs = append(formattedLogs, types.TicketsLogs{
+			ID:        log.ID,
+			TicketsId: log.TicketsId,
+			NewStatus: log.NewStatus,
+			Priority:  log.Priority,
+			Details:   log.Details,
+			UpdateAt:  log.UpdateAt,
+			UpdateAtString: func() string {
+				if log.UpdateAt != nil {
+					return log.UpdateAt.Format("2006-01-02 15:04:05")
+				}
+				return ""
+			}(),
+			User: types.TicketsCreator{
+				Email:  log.UserEmail,
+				Name:   log.UserName,
+				Avatar: log.UserAvatar,
+			},
+		})
+	}
+
+	var formattedTickets map[string]interface{}
+	for _, ticket := range tickets {
+		var ticketCreator types.TicketsCreator
+
+		if err := DB.Table("users").
+			Select("email, name, avatar").
+			Where("email = ?", ticket.UserEmail).
+			Scan(&ticketCreator).Error; err != nil {
+			return
+		}
+
+		if ticketCreator.Avatar != "" {
+			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
+		}
+
+		var lastReply struct {
+			UserEmail string    `json:"user_email"`
+			NewStatus string    `json:"new_status"`
+			UpdatedAt time.Time `json:"update_at"`
+		}
+
+		if err := DB.Table("user_tickets").
+			Select("user_email, new_status, update_at").
+			Where("tickets_id = ?", ticket.TrackingID).
+			Order("update_at DESC").
+			Limit(1).
+			Scan(&lastReply).Error; err != nil {
+			lastReply = struct {
+				UserEmail string    `json:"user_email"`
+				NewStatus string    `json:"new_status"`
+				UpdatedAt time.Time `json:"update_at"`
+			}{}
+		}
+
+		// Get last replier's information
+		var lastReplier *struct {
+			Email  string `json:"email"`
+			Name   string `json:"name"`
+			Avatar string `json:"avatar"`
+		}
+
+		if lastReply.UserEmail != "" {
+			var replierInfo struct {
+				Email  string `json:"email"`
+				Name   string `json:"name"`
+				Avatar string `json:"avatar"`
+			}
+
+			if err := DB.Table("users").
+				Select("email, name, avatar").
+				Where("email = ?", lastReply.UserEmail).
+				Scan(&replierInfo).Error; err == nil {
+
+				if replierInfo.Avatar != "" {
+					replierInfo.Avatar = baseURL + replierInfo.Avatar
+				}
+				lastReplier = &replierInfo
+			}
+		}
+
+		formattedTickets = map[string]interface{}{
+			"id":             ticket.ID,
+			"tracking_id":    ticket.TrackingID,
+			"products_name":  ticket.ProductsName,
+			"hari_masuk":     ticket.HariMasuk.Format("2006-01-02"),
+			"waktu_masuk":    ticket.WaktuMasuk,
+			"solved_time":    ticket.SolvedTime,
+			"user":           ticketCreator,
+			"last_replier":   lastReplier,
+			"category":       ticket.CategoryName,
+			"priority":       ticket.Priority,
+			"status":         ticket.Status,
+			"subject":        ticket.Subject,
+			"no_whatsapp":    ticket.NoWhatsapp,
+			"detail_kendala": ticket.DetailKendala,
+			"pic":            ticket.PIC,
+			"created_date":   ticket.CreatedAt.Format("2006-01-02"),
+			"created_time":   ticket.CreatedAt.Format("15:04:05"),
+			"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
+			"history":        formattedLogs,
+			"respon_admin":   ticket.ResponDiberikan,
+		}
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Tickets retrieved successfully",
+		Data:    formattedTickets,
+	})
+}
+
 // @POST
 func UpdateStatus(c *gin.Context) {
 	var input struct {
-		Status string `json:"status" binding:"required"`
+		Status string `json:"status"`
+	}
+
+	// @Bind JSON
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user struct {
+		Email string `json:"email"`
+	}
+
+	// @GET Token from Header
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Token is Required",
+		})
+		return
+	}
+
+	// @GET User Email from Token
+	if err := DB.Table("users").Select("email").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "User Not Found",
+		})
+		return
+	}
+
+	// @GET Ticket from Database
+	var ticket types.TicketsResponseAll
+	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if input.Status == "Resolved" {
+		startTime := ticket.CreatedAt
+		endTime := time.Now()
+
+		// Hitung selisih waktu (durasi penyelesaian)
+		duration := endTime.Sub(startTime)
+
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+		seconds := int(duration.Seconds()) % 60
+
+		var time struct {
+			SolvedTime string `json:"solved_time"`
+		}
+		time.SolvedTime = fmt.Sprintf("%d hours %d minutes %d seconds", hours, minutes, seconds)
+		ticket.SolvedTime = &time.SolvedTime
+	} else {
+		ticket.SolvedTime = nil
+	}
+
+	ticket.Status = input.Status
+
+	saveHistory := struct {
+		UserEmail string `json:"user_email"`
+		NewStatus string `json:"new_status"`
+		TicketsID string `json:"ticket_id"`
+		Priority  string `json:"priority"`
+		Details   string `json:"details"`
+	}{
+		UserEmail: user.Email,
+		NewStatus: input.Status,
+		TicketsID: c.Param("tracking_id"),
+		Priority:  ticket.Priority,
+		Details:   "Mengubah Status Tickets",
+	}
+
+	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Status updated successfully",
+		Data:    ticket,
+	})
+}
+
+// @POST
+func UpdateTicket(c *gin.Context) {
+	var input struct {
+		ProductsName    string    `json:"products_name"`
+		CategoryName    string    `json:"category_name"`
+		NoWhatsapp      string    `json:"no_whatsapp"`
+		PIC             string    `json:"PIC"`
+		DetailKendala   string    `json:"detail_kendala"`
+		Priority        string    `json:"priority"`
+		Status          string    `json:"status"`
+		HariMasuk       time.Time `json:"hari_masuk"`
+		WaktuMasuk      string    `json:"waktu_masuk"`
+		ResponDiberikan string    `json:"respon_diberikan"`
+	}
+
+	// @Bind JSON
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	var user struct {
@@ -453,71 +1138,51 @@ func UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	// @Bind JSON
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// @UPDATE Ticket in Database
+	input.HariMasuk.Format("2006-01-02")
+	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).Save(&input).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// @GET Ticket from Database
-	var ticket types.Tickets
-	if err := DB.Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "Ticket not found"})
+	var ticket types.TicketsResponseAll
+	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": err.Error()})
 		return
 	}
 
-	var statusNow = ticket.Status
+	ticket.DetailKendala = input.DetailKendala
+	ticket.PIC = input.PIC
 
-	if input.Status == "Resolved" || input.Status == "resolved" {
-		startTime := ticket.CreatedAt
-		endTime := time.Now()
-
-		// Hitung selisih waktu (durasi penyelesaian)
-		duration := endTime.Sub(startTime)
-
-		hours := int(duration.Hours())
-		minutes := int(duration.Minutes()) % 60
-		seconds := int(duration.Seconds()) % 60
-
-		var time struct {
-			SolvedTime string `json:"solved_time"`
-		}
-		time.SolvedTime = fmt.Sprintf("%d hours %d minutes %d seconds", hours, minutes, seconds)
-		fmt.Println(time.SolvedTime)
-
-		if err := DB.Table("tickets").
-			Where("tracking_id = ?", ticket.TrackingID).
-			Update("solved_time", time.SolvedTime).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	ticket.Status = input.Status
-
+	// Save to History
 	saveHistory := struct {
-		UserEmail     string `json:"user_email"`
-		NewStatus     string `json:"new_status"`
-		CurrentStatus string `json:"current_status"`
-		TicketsID     string `json:"ticket_id"`
+		UserEmail string `json:"user_email"`
+		NewStatus string `json:"new_status"`
+		TicketsID string `json:"ticket_id"`
+		Priority  string `json:"priority"`
+		Details   string `json:"details"`
 	}{
-		UserEmail:     user.Email,
-		NewStatus:     input.Status,
-		CurrentStatus: statusNow,
-		TicketsID:     c.Param("tracking_id"),
-	}
-
-	if err := DB.Save(&ticket).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		UserEmail: user.Email,
+		NewStatus: ticket.Status,
+		TicketsID: ticket.TrackingID,
+		Priority:  ticket.Priority,
+		Details:   "Mengubah Data Tiket",
 	}
 
 	if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Status updated successfully", "ticket": ticket, "history": saveHistory})
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Ticket updated successfully",
+		Data:    ticket,
+	})
 }
 
 // @DELETE

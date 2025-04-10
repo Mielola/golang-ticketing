@@ -3,6 +3,7 @@ package routes
 import (
 	"my-gin-project/src/controller/dashboard"
 	"my-gin-project/src/controller/notes"
+	"my-gin-project/src/controller/products"
 	"my-gin-project/src/controller/shifts"
 	"my-gin-project/src/controller/ticket"
 	"my-gin-project/src/controller/user"
@@ -21,7 +22,7 @@ func SetupRoutes(r *gin.Engine) {
 	v1.POST("/login", user.SendOTP)
 	v1.POST("/register", user.Registration)
 	v1.GET("/get-profile", user.GetProfile)
-	v1.POST("/verifys-otp", user.VerifyOTP)
+	v1.POST("/verify-otp", user.VerifyOTP)
 
 	protected_V1 := v1.Group("/")
 	protected_V1.Use(middleware.AuthMiddleware())
@@ -32,16 +33,21 @@ func SetupRoutes(r *gin.Engine) {
 
 	// Dashboard
 	protected_V1.GET("/dashboard", dashboard.GetDashboard)
+	protected_V1.POST("/get-data-form", dashboard.GetForm)
 
 	// Tickets
-	protected_V1.GET("/tickets", ticket.GetAllTickets)
 	protected_V1.POST("/tickets", ticket.AddTicket)
-	protected_V1.DELETE("/tickets/:tracking_id", ticket.DeleteTicket)
-	protected_V1.POST("/tickets/:tracking_id", ticket.UpdateStatus)
+	protected_V1.POST("/tickets/:tracking_id", ticket.UpdateTicket)
+	protected_V1.POST("/ticket-status/:tracking_id", ticket.UpdateStatus)
+	protected_V1.POST("/report", ticket.GenerateReport)
+	protected_V1.GET("/tickets/:tracking_id", ticket.GetTicketByID)
+	protected_V1.GET("/tickets", ticket.GetAllTickets)
 	protected_V1.GET("/tickets/category", ticket.GetTicketsByCategory)
 	protected_V1.GET("/tickets/status", ticket.GetTicketsByStatus)
 	protected_V1.GET("/tickets/priority", ticket.GetTicketsByPriority)
 	protected_V1.GET("/tickets-logs", ticket.GetTicketsLogs)
+	protected_V1.GET("/tickets-date", ticket.GetTicketsByDateRange)
+	protected_V1.DELETE("/tickets/:tracking_id", ticket.DeleteTicket)
 
 	// Auth
 	protected_V1.POST("/logout", user.Logout)
@@ -65,4 +71,7 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/shifts-logs", shifts.GetShiftLogs)
 	protected_V1.GET("/shifts-users", shifts.GetUserShifts)
 	protected_V1.DELETE("/shifts/:id", shifts.DeleteShift)
+
+	// Products
+	protected_V1.GET("/products", products.GetProducts)
 }

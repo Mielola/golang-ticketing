@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-routeros/routeros"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -83,6 +84,30 @@ func GetAllUsers(c *gin.Context) {
 		"success": true,
 		"message": "All users retrieved successfully",
 		"data":    users,
+	})
+}
+
+// @GET Email
+func GetEmail(c *gin.Context) {
+	var email []struct {
+		Id    string `json:"id"`
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}
+
+	if err := DB.Table("users").Scan(&email).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Email" + err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: false,
+		Message: "Success Get Email",
+		Data:    email,
 	})
 }
 
@@ -268,25 +293,55 @@ func SendOTP(c *gin.Context) {
 	})
 }
 
+func ConnectMikrotik(c *gin.Context) {
+	client, err := routeros.Dial("45.149.93.122:8736", "netpro", "netpro")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to MikroTik", "detail": err.Error()})
+		return
+	}
+	defer client.Close()
+
+	res, err := client.Run("/interface/print")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to run command", "detail": err.Error()})
+		return
+	}
+
+	// Format hasil untuk JSON
+	interfaces := []map[string]string{}
+	for _, entry := range res.Re {
+		row := map[string]string{}
+		for key, value := range entry.Map {
+			row[key] = value
+		}
+		interfaces = append(interfaces, row)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":     "success",
+		"interfaces": interfaces,
+	})
+}
+
 // @POST Verify OTP
 func VerifyOTP(c *gin.Context) {
-	var req struct {
+	var input struct {
 		Email string `json:"email"`
 		OTP   string `json:"otp"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	var user types.User
-	if err := DB.Where("email = ? AND OTP = ?", req.Email, req.OTP).First(&user).Error; err != nil {
+	if err := DB.Where("email = ? AND OTP = ?", input.Email, input.OTP).First(&user).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid OTP"})
 		return
 	}
 	// Give Token
-	token, err := GenerateToken(req.OTP)
+	token, err := GenerateToken(input.OTP)
 	if err != nil {
 		fmt.Println("Error generating token:", err)
 		return

@@ -27,9 +27,16 @@ func InitDB() {
 	fmt.Println("Connected to MySQL")
 }
 
-func checkTicketsDeadline() {
+func toSolvedTime(duration time.Duration) *string {
+	h := int(duration.Hours())
+	m := int(duration.Minutes()) % 60
+	s := int(duration.Seconds()) % 60
+	solved := fmt.Sprintf("%d hours %d minutes %d seconds", h, m, s)
+	return &solved
+}
+
+func CheckTicketsDeadline(c *gin.Context) {
 	var tickets []types.TicketsResponseAll
-	var c *gin.Context
 
 	if err := DB.Table("tickets").Select("*").Order("priority DESC").Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -83,12 +90,12 @@ func checkTicketsDeadline() {
 			}
 		}
 
-		if ticket.Status != "Resolved" && time.Since(ticket.CreatedAt) > 24*time.Hour && ticket.Priority != "High" {
+		if ticket.Status != "Resolved" && time.Since(ticket.CreatedAt) > 24*time.Hour && ticket.Priority != "Critical" {
 
 			// Update the ticket's priority to "High"
 			if err := DB.Table("tickets").
 				Where("tracking_id = ?", ticket.TrackingID).
-				Update("priority", "High").Error; err != nil {
+				Update("priority", "Critical").Error; err != nil {
 				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 					Success: false,
 					Message: err.Error(),
@@ -108,8 +115,8 @@ func checkTicketsDeadline() {
 				UserEmail: ticketCreator.Email,
 				NewStatus: ticket.Status,
 				TicketsID: ticket.TrackingID,
-				Priority:  "High",
-				Details:   "Mengupdate Prioritas Ticket",
+				Priority:  "Critical",
+				Details:   "Sistem Otmotatis Mengupdate Prioritas Ticket",
 			}
 
 			if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
@@ -198,45 +205,6 @@ func GetAllTickets(c *gin.Context) {
 			}
 		}
 
-		if ticket.Status != "Resolved" && time.Since(ticket.CreatedAt) > 24*time.Hour && ticket.Priority != "High" {
-
-			// Update the ticket's priority to "High"
-			if err := DB.Table("tickets").
-				Where("tracking_id = ?", ticket.TrackingID).
-				Update("priority", "High").Error; err != nil {
-				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-					Success: false,
-					Message: err.Error(),
-					Data:    nil,
-				})
-				return
-			}
-
-			// Save to History
-			saveHistory := struct {
-				UserEmail string `json:"user_email"`
-				NewStatus string `json:"new_status"`
-				TicketsID string `json:"ticket_id"`
-				Priority  string `json:"priority"`
-				Details   string `json:"details"`
-			}{
-				UserEmail: ticketCreator.Email,
-				NewStatus: ticket.Status,
-				TicketsID: ticket.TrackingID,
-				Priority:  "High",
-				Details:   "Mengupdate Prioritas Ticket",
-			}
-
-			if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-					Success: false,
-					Message: err.Error(),
-				})
-				return
-			}
-
-		}
-
 		formattedTickets = append(formattedTickets, map[string]interface{}{
 			"id":             ticket.ID,
 			"tracking_id":    ticket.TrackingID,
@@ -268,7 +236,6 @@ func GetAllTickets(c *gin.Context) {
 
 // @GET
 func GetTicketsLogs(c *gin.Context) {
-	checkTicketsDeadline()
 	var ticketLogs []types.TicketsLogsRaw
 
 	if err := DB.Table("user_tickets").
@@ -633,10 +600,12 @@ func GenerateReport(c *gin.Context) {
 		})
 		return
 	}
+	var startDateTime = input.StartDate + " " + input.StartTime
+	var endDateTime = input.EndDate + " " + input.EndTime
 
 	if input.Status == "all" || input.Status == "All" {
 		if err := DB.Table("tickets").
-			Where("hari_masuk BETWEEN ? AND ? AND products_name = ? AND waktu_masuk BETWEEN ? and ?", input.StartDate, input.EndDate, input.ProductsName, input.StartTime, input.EndTime).
+			Where("tickets.created_at BETWEEN ? AND ? AND products_name = ?", startDateTime, endDateTime, input.ProductsName).
 			Find(&tickets).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 				Success: false,
@@ -647,7 +616,7 @@ func GenerateReport(c *gin.Context) {
 		}
 	} else {
 		if err := DB.Table("tickets").
-			Where("hari_masuk BETWEEN ? AND ? AND status = ? AND products_name = ? AND waktu_masuk BETWEEN ? and ?", input.StartDate, input.EndDate, input.Status, input.ProductsName, input.StartTime, input.EndTime).
+			Where("tickets.created_at BETWEEN ? AND ? AND status = ? AND products_name = ?", startDateTime, endDateTime, input.Status, input.ProductsName).
 			Find(&tickets).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 				Success: false,
@@ -1063,13 +1032,7 @@ func UpdateStatus(c *gin.Context) {
 
 	ticket.Status = input.Status
 
-	saveHistory := struct {
-		UserEmail string `json:"user_email"`
-		NewStatus string `json:"new_status"`
-		TicketsID string `json:"ticket_id"`
-		Priority  string `json:"priority"`
-		Details   string `json:"details"`
-	}{
+	saveHistory := types.UserTicketHistory{
 		UserEmail: user.Email,
 		NewStatus: input.Status,
 		TicketsID: c.Param("tracking_id"),
@@ -1102,67 +1065,62 @@ func UpdateStatus(c *gin.Context) {
 
 // @POST
 func UpdateTicket(c *gin.Context) {
-	var input struct {
-		ProductsName    string    `json:"products_name"`
-		CategoryName    string    `json:"category_name"`
-		NoWhatsapp      string    `json:"no_whatsapp"`
-		PIC             string    `json:"PIC"`
-		DetailKendala   string    `json:"detail_kendala"`
-		Priority        string    `json:"priority"`
-		Status          string    `json:"status"`
-		HariMasuk       time.Time `json:"hari_masuk"`
-		WaktuMasuk      string    `json:"waktu_masuk"`
-		ResponDiberikan string    `json:"respon_diberikan"`
-	}
-
-	// @Bind JSON
+	var input types.UpdateTicketInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	var user struct {
-		Email string `json:"email"`
-	}
-
-	// @GET Token from Header
 	token := c.GetHeader("Authorization")
 	if token == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
 		return
 	}
 
-	// @GET User Email from Token
+	// Get user email from token
+	var user struct {
+		Email string
+	}
 	if err := DB.Table("users").Select("email").Where("token = ?", token).First(&user).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
 		return
 	}
 
-	// @UPDATE Ticket in Database
-	input.HariMasuk.Format("2006-01-02")
-	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).Save(&input).Error; err != nil {
+	// Update ticket data
+	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).Updates(input).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// @GET Ticket from Database
+	// Get updated ticket
 	var ticket types.TicketsResponseAll
 	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": err.Error()})
 		return
 	}
 
+	// Calculate resolved time if status is Resolved
+	if ticket.Status == "Resolved" {
+		duration := time.Since(ticket.CreatedAt)
+		ticket.SolvedTime = toSolvedTime(duration)
+	} else {
+		ticket.SolvedTime = nil
+	}
+
 	ticket.DetailKendala = input.DetailKendala
 	ticket.PIC = input.PIC
 
-	// Save to History
-	saveHistory := struct {
-		UserEmail string `json:"user_email"`
-		NewStatus string `json:"new_status"`
-		TicketsID string `json:"ticket_id"`
-		Priority  string `json:"priority"`
-		Details   string `json:"details"`
-	}{
+	// Save update to ticket
+	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Save history
+	history := types.UserTicketHistory{
 		UserEmail: user.Email,
 		NewStatus: ticket.Status,
 		TicketsID: ticket.TrackingID,
@@ -1170,7 +1128,7 @@ func UpdateTicket(c *gin.Context) {
 		Details:   "Mengubah Data Tiket",
 	}
 
-	if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
+	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),

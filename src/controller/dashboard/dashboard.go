@@ -38,6 +38,7 @@ func GetDashboard(c *gin.Context) {
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
 			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
 			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
+			COUNT(CASE WHEN priority = 'Critical' THEN 1 END) as critical_tickets,
 			COUNT("*") as total_tickets
 		`).
 		Scan(&tickets).Error; err != nil {
@@ -196,7 +197,7 @@ func GetForm(c *gin.Context) {
 	}
 
 	var categories []string
- 
+
 	if err := c.ShouldBindJSON(&Product); err != nil {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,

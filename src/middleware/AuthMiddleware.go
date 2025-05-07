@@ -11,10 +11,7 @@ import (
 
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Ambil token dari header Authorization
 		token := c.GetHeader("Authorization")
-
-		// Hapus "Bearer " jika ada
 		if strings.HasPrefix(token, "Bearer ") {
 			token = strings.TrimPrefix(token, "Bearer ")
 		}

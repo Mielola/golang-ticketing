@@ -79,16 +79,15 @@ type TicketsResponseAll struct {
 }
 
 type TicketsLogsRaw struct {
-	ID            uint       `json:"id"`
-	TicketsId     string     `json:"tickets_id"`
-	Priority      string     `json:"priority"`
-	NewStatus     string     `json:"new_status"`
-	CurrentStatus string     `json:"current_status"`
-	UpdateAt      *time.Time `json:"update_at"`
-	Details       string     `json:"details"`
-	UserEmail     string     `json:"user_email"`
-	UserName      string     `json:"user_name"`
-	UserAvatar    string     `json:"user_avatar"`
+	ID         uint       `json:"id"`
+	TicketsId  string     `json:"tickets_id"`
+	Priority   string     `json:"priority"`
+	NewStatus  string     `json:"new_status"`
+	UpdateAt   *time.Time `json:"update_at"`
+	Details    string     `json:"details"`
+	UserEmail  string     `json:"user_email"`
+	UserName   string     `json:"user_name"`
+	UserAvatar string     `json:"user_avatar"`
 }
 
 type TicketsCreator struct {
@@ -102,6 +101,7 @@ type TicketsResponse struct {
 	PendingTickets  int `json:"pending_tickets"`
 	ResolvedTickets int `json:"resolved_tickets"`
 	TotalTickets    int `json:"total_tickets"`
+	CriticalTickets int `json:"critical_tickets"`
 }
 
 type TicketsLogs struct {
@@ -117,6 +117,26 @@ type TicketsLogs struct {
 	UpdateAt       *time.Time     `json:"-"`
 	UpdateAtString string         `json:"update_at"`
 	User           TicketsCreator `json:"user"`
+}
+
+type UpdateTicketInput struct {
+	ProductsName    string    `json:"products_name"`
+	CategoryName    string    `json:"category_name"`
+	NoWhatsapp      string    `json:"no_whatsapp"`
+	PIC             string    `json:"PIC"`
+	DetailKendala   string    `json:"detail_kendala"`
+	Priority        string    `json:"priority"`
+	Status          string    `json:"status"`
+	HariMasuk       time.Time `json:"hari_masuk"`
+	WaktuMasuk      string    `json:"waktu_masuk"`
+	ResponDiberikan string    `json:"respon_diberikan"`
+}
+type UserTicketHistory struct {
+	UserEmail string `json:"user_email"`
+	NewStatus string `json:"new_status"`
+	TicketsID string `json:"ticket_id"`
+	Priority  string `json:"priority"`
+	Details   string `json:"details"`
 }
 
 // --------------------------------------------
@@ -237,7 +257,9 @@ type ShiftRequest struct {
 
 type ShiftResponse struct {
 	ID        uint   `json:"id"`
+	ShiftId   uint   `json:"shift_id"`
 	UserEmail string `json:"user_email"`
+	Name      string `json:"name"`
 	ShiftName string `json:"shift_name"`
 	ShiftDate string `json:"shift_date"`
 }

@@ -38,6 +38,7 @@ func GetDashboard(c *gin.Context) {
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
 			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
 			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
+			COUNT(CASE WHEN priority = 'Critical' THEN 1 END) as critical_tickets,
 			COUNT("*") as total_tickets
 		`).
 		Scan(&tickets).Error; err != nil {
@@ -134,6 +135,7 @@ func GetDashboard(c *gin.Context) {
 	// @ Format User Data
 	// --------------------------------------------
 	baseURL := "http://localhost:8080/storage/images/"
+
 	userMap := make(map[string]types.UserResponseWithoutToken)
 	for _, user := range users {
 		if user.Avatar != nil {
@@ -186,6 +188,51 @@ func GetDashboard(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dashboardData)
+}
+
+// @ GET
+func GetForm(c *gin.Context) {
+	var Product struct {
+		Name string `json:"name"`
+	}
+
+	var categories []string
+
+	if err := c.ShouldBindJSON(&Product); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Body must be JSON",
+			Data:    nil,
+		})
+		return
+	}
+
+	if Product.Name == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Product name is required",
+			Data:    nil,
+		})
+		return
+	}
+
+	if err := DB.Table("category").
+		Select("category_name").
+		Where("products_id = (SELECT id FROM products WHERE name = ?)", Product.Name).
+		Pluck("category_name", &categories).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Data retrieved successfully",
+		Data:    categories,
+	})
 }
 
 func SetDB(db *gorm.DB) {

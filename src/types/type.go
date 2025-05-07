@@ -18,14 +18,16 @@ type Tickets struct {
 	Priority        string     `json:"priority"`
 	Status          string     `json:"status"`
 	Subject         string     `json:"subject"`
-	NoWhatsapp      string     `json:"no_whatsapp" binding:"required"`
+	NoWhatsapp      string     `json:"no_whatsapp"`
 	DetailKendala   string     `json:"detail_kendala"`
 	TimeWorked      *int       `json:"time_worked,omitempty"`
 	DueDate         *time.Time `json:"due_date,omitempty"`
 	ResponDiberikan string     `json:"respon_diberikan,omitempty"`
 	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
-	PIC             string     `json:"PIC" binding:"required"`
+	PIC             string     `json:"PIC"`
+	SolvedTime      *string    `json:"solved_time,omitempty"`
+	UserAvatar      string     `json:"user_avatar,omitempty"`
 }
 
 type TicketsInput struct {
@@ -54,6 +56,7 @@ type TicketsInput struct {
 type TicketsResponseAll struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
 	TrackingID      string     `json:"tracking_id"`
+	ProductsName    string     `json:"products_name"`
 	HariMasuk       time.Time  `json:"hari_masuk"`
 	WaktuMasuk      string     `json:"waktu_masuk"`
 	HariRespon      string     `json:"hari_respon,omitempty"`
@@ -76,14 +79,15 @@ type TicketsResponseAll struct {
 }
 
 type TicketsLogsRaw struct {
-	ID            uint       `json:"id"`
-	TicketsId     string     `json:"tickets_id"`
-	NewStatus     string     `json:"new_status"`
-	CurrentStatus string     `json:"current_status"`
-	UpdateAt      *time.Time `json:"update_at"`
-	UserEmail     string     `json:"user_email"`
-	UserName      string     `json:"user_name"`
-	UserAvatar    string     `json:"user_avatar"`
+	ID         uint       `json:"id"`
+	TicketsId  string     `json:"tickets_id"`
+	Priority   string     `json:"priority"`
+	NewStatus  string     `json:"new_status"`
+	UpdateAt   *time.Time `json:"update_at"`
+	Details    string     `json:"details"`
+	UserEmail  string     `json:"user_email"`
+	UserName   string     `json:"user_name"`
+	UserAvatar string     `json:"user_avatar"`
 }
 
 type TicketsCreator struct {
@@ -97,11 +101,14 @@ type TicketsResponse struct {
 	PendingTickets  int `json:"pending_tickets"`
 	ResolvedTickets int `json:"resolved_tickets"`
 	TotalTickets    int `json:"total_tickets"`
+	CriticalTickets int `json:"critical_tickets"`
 }
 
 type TicketsLogs struct {
 	ID             uint           `json:"id" gorm:"primaryKey;autoIncrement"`
 	TicketsId      string         `json:"tickets_id"`
+	Details        string         `json:"details"`
+	Priority       string         `json:"priority"`
 	UserEmail      string         `json:"-"`
 	UserName       string         `json:"-"`
 	UserAvatar     string         `json:"-"`
@@ -110,6 +117,26 @@ type TicketsLogs struct {
 	UpdateAt       *time.Time     `json:"-"`
 	UpdateAtString string         `json:"update_at"`
 	User           TicketsCreator `json:"user"`
+}
+
+type UpdateTicketInput struct {
+	ProductsName    string    `json:"products_name"`
+	CategoryName    string    `json:"category_name"`
+	NoWhatsapp      string    `json:"no_whatsapp"`
+	PIC             string    `json:"PIC"`
+	DetailKendala   string    `json:"detail_kendala"`
+	Priority        string    `json:"priority"`
+	Status          string    `json:"status"`
+	HariMasuk       time.Time `json:"hari_masuk"`
+	WaktuMasuk      string    `json:"waktu_masuk"`
+	ResponDiberikan string    `json:"respon_diberikan"`
+}
+type UserTicketHistory struct {
+	UserEmail string `json:"user_email"`
+	NewStatus string `json:"new_status"`
+	TicketsID string `json:"ticket_id"`
+	Priority  string `json:"priority"`
+	Details   string `json:"details"`
 }
 
 // --------------------------------------------
@@ -230,7 +257,9 @@ type ShiftRequest struct {
 
 type ShiftResponse struct {
 	ID        uint   `json:"id"`
+	ShiftId   uint   `json:"shift_id"`
 	UserEmail string `json:"user_email"`
+	Name      string `json:"name"`
 	ShiftName string `json:"shift_name"`
 	ShiftDate string `json:"shift_date"`
 }

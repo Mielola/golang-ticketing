@@ -25,7 +25,7 @@ var DB *gorm.DB
 
 func InitDB() {
 	var err error
-	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("could not connect to the database: %v", err)
@@ -141,7 +141,7 @@ func GetProfile(c *gin.Context) {
 	}
 
 	// Avatar Base Url
-	baseURL := "http://localhost:8080/storage/images/"
+	baseURL := "http://db:8080/storage/images/"
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL

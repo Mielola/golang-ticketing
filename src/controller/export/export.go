@@ -2,33 +2,17 @@ package export
 
 import (
 	"fmt"
-	"log"
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Connected to MySQL")
-}
-
-func init() {
-	InitDB()
-}
-
 func ExportTickets(c *gin.Context) {
+	DB := database.GetDB()
+
 	var input struct {
 		StartDate    string   `json:"start_date" binding:"required"`
 		EndDate      string   `json:"end_date" binding:"required"`
@@ -81,7 +65,7 @@ func ExportTickets(c *gin.Context) {
 
 	if err := DB.Table("tickets").Select("*, tickets.status").
 		Joins("LEFT JOIN users ON tickets.user_email = users.email").
-		Where("users.email IN (?) AND tickets.created_at BETWEEN ? AND ? AND products_name = ?", input.Email, startDateTime, endDateTime, input.ProductsName).
+		Where("users.email IN (?) AND tickets.created_at  BETWEEN ? AND ? AND products_name = ?", input.Email, startDateTime, endDateTime, input.ProductsName).
 		Order("priority DESC").Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -258,6 +242,8 @@ func ExportTickets(c *gin.Context) {
 }
 
 func ExportUsers(c *gin.Context) {
+	DB := database.GetDB()
+
 	var input struct {
 		StartDate    string   `json:"start_date" binding:"required"`
 		EndDate      string   `json:"end_date" binding:"required"`
@@ -312,7 +298,7 @@ func ExportUsers(c *gin.Context) {
 
 	if err := DB.Table("tickets").Select("*, tickets.status").
 		Joins("LEFT JOIN users ON tickets.user_email = users.email").
-		Where("users.email IN (?) AND tickets.created_at BETWEEN ? AND ? AND products_name = ?", input.Email, startDateTime, endDateTime, input.ProductsName).
+		Where("users.email IN (?) AND tickets.created_at  BETWEEN ? AND ? AND products_name = ?", input.Email, startDateTime, endDateTime, input.ProductsName).
 		Order("users.email").Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -488,6 +474,7 @@ func ExportUsers(c *gin.Context) {
 }
 
 func ExportLogs(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		HistoryType string `json:"history_type"`
 	}

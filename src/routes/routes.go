@@ -24,7 +24,6 @@ func SetupRoutes(r *gin.Engine) {
 	v1.POST("/login", user.SendOTP)
 	v1.POST("/register", user.Registration)
 	v1.POST("/verify-otp", user.VerifyOTP)
-	v1.GET("/mikrotik", user.ConnectMikrotik)
 
 	protected_V1 := v1.Group("/")
 	protected_V1.Use(middleware.AuthMiddleware())
@@ -38,6 +37,7 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.POST("/get-data-form", dashboard.GetForm)
 
 	// Tickets
+	protected_V1.GET("/handover", shifts.GetHandoverTickets)
 	protected_V1.POST("/tickets", ticket.AddTicket)
 	protected_V1.GET("/tickets", ticket.GetAllTickets)
 	protected_V1.POST("/tickets/:tracking_id", ticket.UpdateTicket)

@@ -1,34 +1,21 @@
 package notes
 
 import (
-	"fmt"
-	"log"
 	"net/http"
 
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
-
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Connected to MySQL")
-}
 
 // --------------------------------------------
 // @ GET
 // --------------------------------------------
 
 func GetAllNotes(c *gin.Context) {
+	DB := database.GetDB()
+
 	var notes []struct {
 		ID      uint   `json:"id"`
 		Title   string `json:"title"`
@@ -88,6 +75,7 @@ func GetAllNotes(c *gin.Context) {
 // }
 
 func FindByEmail(c *gin.Context) {
+	DB := database.GetDB()
 	var user types.User
 	var notes []types.NoteDetail
 	var noteResponse types.NoteResponse
@@ -133,6 +121,7 @@ func FindByEmail(c *gin.Context) {
 // --------------------------------------------
 
 func CreateNote(c *gin.Context) {
+	DB := database.GetDB()
 	var input types.NoteBody
 
 	// switch {
@@ -158,8 +147,4 @@ func CreateNote(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"status": true, "message": "Notes added successfully", "users": input})
-}
-
-func init() {
-	InitDB()
 }

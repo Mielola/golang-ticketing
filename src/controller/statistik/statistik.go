@@ -1,34 +1,16 @@
 package statistik
 
 import (
-	"fmt"
-	"log"
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(localhost:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Connected to MySQL")
-}
-
-func init() {
-	InitDB()
-}
-
 func GetStatistik(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		ProductsName string `json:"products_name" binding:"required"`
 		StartDate    string `json:"start_date" binding:"required"`
@@ -37,9 +19,7 @@ func GetStatistik(c *gin.Context) {
 
 	var userTickets []struct {
 		Name             string `json:"name"`
-		Role             string `json:"role"`
-		TotalUserRole    string `json:"total_user_role"`
-		TotalUserTickets string `json:"total_user_tickets"`
+		TotalUserTickets int    `json:"total_user_tickets"`
 	}
 
 	var chartCategory []struct {
@@ -48,9 +28,25 @@ func GetStatistik(c *gin.Context) {
 	}
 
 	var chartPriority struct {
-		Low    int `json:"low"`
-		Medium int `json:"medium"`
-		High   int `json:"high"`
+		Low      int `json:"low"`
+		Medium   int `json:"medium"`
+		High     int `json:"high"`
+		Critical int `json:"critical"`
+	}
+
+	var charUserRole []struct {
+		Role          *string `json:"role"`
+		TotalUserRole *string `json:"total_user_role"`
+	}
+
+	var chartTicketPeriode []struct {
+		CreatedAt    *time.Time `json:"created_at"`
+		TotalTickets *string    `json:"total_tickets"`
+	}
+
+	var chartUserResolved []struct {
+		Name          string `json:"name"`
+		ResolvedCount string `json:"resolved_count"`
 	}
 
 	type PriorityItem struct {
@@ -96,8 +92,8 @@ func GetStatistik(c *gin.Context) {
 
 	// Chart Tickets Berdasarkan Prioritas
 	if err := DB.Table("tickets").
-		Select("COUNT(CASE WHEN priority = 'Low' THEN 1 END) AS low, COUNT(CASE WHEN priority = 'Medium' THEN 1 END) AS medium, COUNT(CASE WHEN priority = 'High' THEN 1 END) AS high").
-		Where("tickets.created_at BETWEEN ? AND ? AND products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
+		Select("COUNT(CASE WHEN priority = 'Low' THEN 1 END) AS low, COUNT(CASE WHEN priority = 'Medium' THEN 1 END) AS medium, COUNT(CASE WHEN priority = 'High' THEN 1 END) AS high, COUNT(CASE WHEN priority = 'Critical' THEN 1 END) AS critical").
+		Where("Date(tickets.created_at) BETWEEN ? AND ? AND products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
 		Find(&chartPriority).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -110,7 +106,7 @@ func GetStatistik(c *gin.Context) {
 	// Chart Tickets Berdasarkan Category
 	if err := DB.Table("category").
 		Select("category.category_name, COUNT(tickets.id) AS total_tickets").
-		Joins("LEFT JOIN tickets ON tickets.category_name = category.category_name AND tickets.created_at BETWEEN ? AND ? AND tickets.products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
+		Joins("LEFT JOIN tickets ON tickets.category_name = category.category_name AND DATE(tickets.created_at) BETWEEN ? AND ? AND tickets.products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
 		Where("category.products_id = (SELECT id FROM products WHERE name = ?)", input.ProductsName).
 		Group("category.category_name").
 		Find(&chartCategory).Error; err != nil {
@@ -124,9 +120,9 @@ func GetStatistik(c *gin.Context) {
 
 	// Chart User total tickets
 	if err := DB.Table("users").
-		Select("users.name, users.role, COUNT(users.role) AS total_user_role, COUNT(tickets.id) AS total_user_tickets").
-		Joins("LEFT JOIN tickets ON users.email = tickets.user_email AND tickets.products_name = ? AND tickets.created_at BETWEEN ? AND ?", input.ProductsName, input.StartDate, input.EndDate).
-		Group("users.name, users.role").
+		Select("users.name, COUNT(tickets.id) AS total_user_tickets").
+		Joins("LEFT JOIN tickets ON users.email = tickets.user_email AND tickets.products_name = ? AND DATE(tickets.created_at) BETWEEN ? AND ?", input.ProductsName, input.StartDate, input.EndDate).
+		Group("users.name").
 		Find(&userTickets).
 		Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -136,17 +132,59 @@ func GetStatistik(c *gin.Context) {
 		return
 	}
 
+	// Chart Total Ticket Berdasarkan Periode
+	if err := DB.Table("tickets").
+		Select("DATE(tickets.created_at) AS created_at, COUNT(tickets.id) AS total_tickets").
+		Where("DATE(tickets.created_at) BETWEEN ? AND ? AND tickets.products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
+		Group("DATE(tickets.created_at)").
+		Find(&chartTicketPeriode).
+		Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Chart Total Role
+	if err := DB.Table("users").
+		Select("users.role, COUNT(users.role) AS total_user_role").
+		Group("users.role").
+		Find(&charUserRole).
+		Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Chart User Total Resolved
+	if err := DB.Table("users").
+		Select("users.name,users.email,COUNT(CASE WHEN user_tickets.new_status = 'Resolved' THEN user_tickets.tickets_id END) AS resolved_count").
+		Joins("LEFT JOIN user_tickets ON users.email = user_tickets.user_email").
+		Group("users.name, users.email").
+		Scan(&chartUserResolved).
+		Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
 	priorityItems := []PriorityItem{
 		{Label: "Low", Value: chartPriority.Low},
 		{Label: "Medium", Value: chartPriority.Medium},
 		{Label: "High", Value: chartPriority.High},
+		{Label: "Critical", Value: chartPriority.Critical},
 	}
 
-	chartUsersRole := make([]map[string]interface{}, 0)
-	for _, users := range userTickets {
-		chartUsersRole = append(chartUsersRole, map[string]interface{}{
-			"role":            users.Role,
-			"total_user_role": users.TotalUserRole,
+	ChartUserTicketsFormatted := make([]map[string]interface{}, 0)
+	for _, ticketsItem := range chartTicketPeriode {
+		ChartUserTicketsFormatted = append(ChartUserTicketsFormatted, map[string]interface{}{
+			"created_at":    ticketsItem.CreatedAt.Format("2006-01-02"),
+			"total_tickets": ticketsItem.TotalTickets,
 		})
 	}
 
@@ -162,10 +200,12 @@ func GetStatistik(c *gin.Context) {
 		Success: true,
 		Message: "Report generated successfully",
 		Data: gin.H{
-			"ChartUserTickets": userTickets,
-			"ChartPriority":    priorityItems,
-			"ChartCategory":    categoryItems,
-			"ChartUserRole":    chartUsersRole,
+			"ChartUserTickets":   userTickets,
+			"ChartTicketPeriode": ChartUserTicketsFormatted,
+			"ChartPriority":      priorityItems,
+			"ChartCategory":      categoryItems,
+			"CharUserRole":       charUserRole,
+			"ChartUserResolved":  chartUserResolved,
 		},
 	})
 }

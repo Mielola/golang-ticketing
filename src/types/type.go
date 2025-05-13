@@ -45,37 +45,33 @@ type TicketsInput struct {
 	Subject         string     `json:"subject"`
 	NoWhatsapp      string     `json:"no_whatsapp" binding:"required"`
 	DetailKendala   string     `json:"detail_kendala"`
-	TimeWorked      *int       `json:"time_worked,omitempty"`
-	DueDate         *time.Time `json:"due_date,omitempty"`
 	ResponDiberikan string     `json:"respon_diberikan,omitempty"`
 	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+	UpdatedAt       *time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 	PIC             string     `json:"PIC" binding:"required"`
 }
 
 type TicketsResponseAll struct {
-	ID              uint       `gorm:"primaryKey" json:"id"`
-	TrackingID      string     `json:"tracking_id"`
-	ProductsName    string     `json:"products_name"`
-	HariMasuk       time.Time  `json:"hari_masuk"`
-	WaktuMasuk      string     `json:"waktu_masuk"`
-	HariRespon      string     `json:"hari_respon,omitempty"`
-	WaktuRespon     string     `json:"waktu_respon,omitempty"`
-	UserName        string     `json:"user_name,omitempty"`
-	UserEmail       string     `json:"user_email"`
-	NoWhatsapp      string     `json:"no_whatsapp"`
-	CategoryName    string     `json:"category_name"`
-	Priority        string     `json:"priority"`
-	Status          string     `json:"status"`
-	Subject         string     `json:"subject"`
-	DetailKendala   string     `json:"detail_kendala"`
-	PIC             string     `json:"PIC"`
-	TimeWorked      *int       `json:"time_worked,omitempty"`
-	DueDate         *time.Time `json:"due_date,omitempty"`
-	ResponDiberikan string     `json:"respon_diberikan,omitempty"`
-	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
-	SolvedTime      *string    `json:"solved_time,omitempty"`
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	TrackingID      string    `json:"tracking_id"`
+	ProductsName    string    `json:"products_name"`
+	HariMasuk       time.Time `json:"hari_masuk"`
+	WaktuMasuk      string    `json:"waktu_masuk"`
+	HariRespon      string    `json:"hari_respon,omitempty"`
+	WaktuRespon     string    `json:"waktu_respon,omitempty"`
+	UserName        string    `json:"user_name,omitempty"`
+	UserEmail       string    `json:"user_email"`
+	NoWhatsapp      string    `json:"no_whatsapp"`
+	CategoryName    string    `json:"category_name"`
+	Priority        string    `json:"priority"`
+	Status          string    `json:"status"`
+	Subject         string    `json:"subject"`
+	DetailKendala   string    `json:"detail_kendala"`
+	PIC             string    `json:"PIC"`
+	ResponDiberikan string    `json:"respon_diberikan,omitempty"`
+	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	SolvedTime      *string   `json:"solved_time,omitempty"`
 }
 
 type TicketsLogsRaw struct {
@@ -179,13 +175,14 @@ type UserResponse struct {
 }
 
 type UserResponseWithoutToken struct {
-	ID        uint    `json:"id"`
-	Email     string  `json:"email"`
-	Name      string  `json:"name"`
-	Role      string  `json:"role"`
-	ShiftName *string `json:"shift_name"`
-	Avatar    *string `json:"avatar"`
-	Status    string  `json:"status"`
+	ID          uint    `json:"id"`
+	Email       string  `json:"email"`
+	Name        string  `json:"name"`
+	Role        string  `json:"role"`
+	ShiftName   *string `json:"shift_name"`
+	Avatar      *string `json:"avatar"`
+	Status      string  `json:"status"`
+	ShiftStatus *string `json:"shift_status"`
 }
 type UserResponseWithoutRole struct {
 	ID        uint    `json:"id"`
@@ -292,13 +289,13 @@ type DashboardResponse struct {
 type DataContent struct {
 	Summary       TicketsResponse          `json:"summary"`
 	RecentTickets []map[string]interface{} `json:"recent_tickets"`
-	UserLogs      []UserLogResponse        `json:"user_logs"`
+	UserLogs      interface{}              `json:"user_logs"`
 }
 
 type UserLogResponse struct {
 	UserResponseWithoutToken
-	LoginDate string `json:"login_date"`
-	LoginTime string `json:"login_time"`
+	LoginDate time.Time `json:"login_date"`
+	LoginTime time.Time `json:"login_time"`
 }
 
 // --------------------------------------------

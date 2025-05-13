@@ -171,7 +171,7 @@ func GetProfile(c *gin.Context) {
 	}
 
 	// Avatar Base Url
-	baseURL := "http://localhost:8080/storage/images/"
+	baseURL := "http://db:8080/storage/images/"
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL

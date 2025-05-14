@@ -13,6 +13,7 @@ var DB *gorm.DB
 
 func main() {
 	database.InitDB()
+	database.MigrateDB()
 
 	r := gin.Default()
 

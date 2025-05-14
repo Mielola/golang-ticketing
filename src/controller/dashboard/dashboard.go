@@ -1,34 +1,17 @@
 package dashboard
 
 import (
-	"fmt"
-	"log"
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Dashboard: Connected to MySQL")
-}
-
-func init() {
-	InitDB()
-}
-
 func GetDashboard(c *gin.Context) {
+	DB := database.GetDB()
+
 	// --------------------------------------------
 	// @ GET Tickets Summary
 	// --------------------------------------------
@@ -53,7 +36,6 @@ func GetDashboard(c *gin.Context) {
 		Category      string     `json:"category_name"`
 		CreatedAt     time.Time  `json:"created_at"`
 		DetailKendala string     `json:"detail_kendala"`
-		DueDate       *time.Time `json:"due_date"`
 		HariMasuk     *time.Time `json:"hari_masuk"`
 		WaktuMasuk    string     `json:"waktu_masuk"`
 		Subject       string     `json:"subject"`
@@ -62,7 +44,7 @@ func GetDashboard(c *gin.Context) {
 
 	var recentTickets []RecentTicket
 	if err := DB.Table("tickets").
-		Select("category_name, created_at, detail_kendala, due_date, hari_masuk, waktu_masuk, subject, user_email").
+		Select("category_name, created_at, detail_kendala, hari_masuk, waktu_masuk, subject, user_email").
 		Order("created_at DESC").
 		Limit(10).
 		Scan(&recentTickets).Error; err != nil {
@@ -75,7 +57,6 @@ func GetDashboard(c *gin.Context) {
 		Category      string  `json:"category_name"`
 		CreatedAt     string  `json:"created_at"`
 		DetailKendala string  `json:"detail_kendala"`
-		DueDate       *string `json:"due_date,omitempty"`
 		HariMasuk     *string `json:"hari_masuk,omitempty"`
 		WaktuMasuk    string  `json:"waktu_masuk"`
 		Subject       string  `json:"subject"`
@@ -84,23 +65,17 @@ func GetDashboard(c *gin.Context) {
 
 	var formattedTickets []FormattedRecentTicket
 	for _, ticket := range recentTickets {
-		var formattedHariMasuk, formattedDueDate *string
+		var formattedHariMasuk *string
 
 		if ticket.HariMasuk != nil {
 			formatted := ticket.HariMasuk.Format("2006-01-02")
 			formattedHariMasuk = &formatted
 		}
 
-		if ticket.DueDate != nil {
-			formatted := ticket.DueDate.Format("2006-01-02")
-			formattedDueDate = &formatted
-		}
-
 		formattedTickets = append(formattedTickets, FormattedRecentTicket{
 			Category:      ticket.Category,
 			CreatedAt:     ticket.CreatedAt.Format("2006-01-02 15:04:05"),
 			DetailKendala: ticket.DetailKendala,
-			DueDate:       formattedDueDate,
 			HariMasuk:     formattedHariMasuk,
 			WaktuMasuk:    ticket.WaktuMasuk,
 			Subject:       ticket.Subject,
@@ -111,51 +86,34 @@ func GetDashboard(c *gin.Context) {
 	// --------------------------------------------
 	// @ GET User Logs
 	// --------------------------------------------
-	var rawLogs []struct {
-		UserEmail string    `json:"user_email"`
-		LoginTime time.Time `json:"login_time"`
-	}
+	var userLogs []types.UserLogResponse
 
-	var users []types.UserResponseWithoutToken
-	if err := DB.Table("user_logs").Select("*").Order("login_time DESC").Scan(&rawLogs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
-	}
-
-	if err := DB.Table("users").
-		Select("users.*").
-		Joins("JOIN user_logs ON user_logs.user_email = users.email").
+	if err := DB.Table("user_logs").
+		Select("user_logs.login_time, users.avatar, users.email, users.name, users.role, users.avatar, users.status, user_logs.shift_name").
+		Joins("JOIN users ON user_logs.user_email = users.email").
 		Order("user_logs.login_time DESC").
-		Scan(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		Find(&userLogs).
+		Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Data User Logs",
+		})
 		return
 	}
 
-	// --------------------------------------------
-	// @ Format User Data
-	// --------------------------------------------
+	formattedUserLogs := make([]map[string]interface{}, 0)
 	baseURL := "http://localhost:8080/storage/images/"
 
-	userMap := make(map[string]types.UserResponseWithoutToken)
-	for _, user := range users {
-		if user.Avatar != nil {
-			avatarURL := baseURL + *user.Avatar
-			user.Avatar = &avatarURL
-		}
-		userMap[user.Email] = user
-	}
-
-	var userResponse []types.UserLogResponse
-	for _, log := range rawLogs {
-		userData, exists := userMap[log.UserEmail]
-		if !exists {
-			continue
-		}
-
-		userResponse = append(userResponse, types.UserLogResponse{
-			UserResponseWithoutToken: userData,
-			LoginDate:                log.LoginTime.Format("2006-01-02"),
-			LoginTime:                log.LoginTime.Format("15:04:05"),
+	for _, user := range userLogs {
+		formattedUserLogs = append(formattedUserLogs, map[string]interface{}{
+			"email":      user.Email,
+			"name":       user.Name,
+			"role":       user.Role,
+			"avatar":     baseURL + *user.Avatar,
+			"shift_name": user.ShiftName,
+			"status":     user.Status,
+			"login_date": user.LoginTime.Format("2006-01-02"),
+			"login_time": user.LoginTime.Format("15:04:05"),
 		})
 	}
 
@@ -168,7 +126,6 @@ func GetDashboard(c *gin.Context) {
 			"category":       ticket.Category,
 			"created_at":     ticket.CreatedAt,
 			"detail_kendala": ticket.DetailKendala,
-			"due_date":       ticket.DueDate,
 			"hari_masuk":     ticket.HariMasuk,
 			"waktu_masuk":    ticket.WaktuMasuk,
 			"subject":        ticket.Subject,
@@ -183,7 +140,7 @@ func GetDashboard(c *gin.Context) {
 		Data: types.DataContent{
 			Summary:       tickets,
 			RecentTickets: recentTicketsMap,
-			UserLogs:      userResponse,
+			UserLogs:      formattedUserLogs,
 		},
 	}
 
@@ -192,6 +149,7 @@ func GetDashboard(c *gin.Context) {
 
 // @ GET
 func GetForm(c *gin.Context) {
+	DB := database.GetDB()
 	var Product struct {
 		Name string `json:"name"`
 	}
@@ -233,8 +191,4 @@ func GetForm(c *gin.Context) {
 		Message: "Data retrieved successfully",
 		Data:    categories,
 	})
-}
-
-func SetDB(db *gorm.DB) {
-	DB = db
 }

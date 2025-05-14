@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"log"
 	"math/rand"
 	"my-gin-project/src/controller/email"
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
 	"path/filepath"
@@ -16,24 +16,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-routeros/routeros"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Connected to MySQL")
-}
-
-var secretKey = []byte("commandcenter-ticketing")
+var secretKey = []byte("commandcenter2-ticketing")
 
 func GenerateToken(username string) (string, error) {
 	// Buat klaim token
@@ -61,6 +46,7 @@ func generateOTP() string {
 
 // @GET Users
 func GetAllUsers(c *gin.Context) {
+	DB := database.GetDB()
 	var users []types.UserResponse
 	tableName := "users"
 
@@ -89,6 +75,7 @@ func GetAllUsers(c *gin.Context) {
 
 // @GET Email
 func GetEmail(c *gin.Context) {
+	DB := database.GetDB()
 	var email []struct {
 		Id    string `json:"id"`
 		Email string `json:"email"`
@@ -113,6 +100,7 @@ func GetEmail(c *gin.Context) {
 
 // @GET Users
 func GetProfile(c *gin.Context) {
+	DB := database.GetDB()
 	var response types.UserResponseWithoutToken
 	token := c.GetHeader("Authorization")
 	query := DB.Table("users").Where("users.token = ?", token).First(&response)
@@ -122,26 +110,68 @@ func GetProfile(c *gin.Context) {
 		return
 	}
 
-	// Cek shift saat ini
-	var shifts struct {
-		ShiftName string `json:"shift_name"`
-	}
-	currentDate := time.Now().Format("2006-01-02")
-
-	if err := DB.Table("shifts").
-		Select("shifts.shift_name").
-		Joins("JOIN employee_shifts ON shifts.id = employee_shifts.shift_id").
-		Where("employee_shifts.user_email = ? AND employee_shifts.shift_date = ?", response.Email, currentDate).
-		Scan(&shifts).Error; err != nil {
-		fmt.Printf("Error fetching shifts: %v\n", err)
+	// Cek shift saat ini dengan query yang lebih lengkap
+	type ShiftInfo struct {
+		ShiftID     uint    `json:"shift_id"`
+		ShiftDate   string  `json:"shift_date"`
+		StartTime   string  `json:"start_time"`
+		EndTime     string  `json:"end_time"`
+		ShiftName   string  `json:"shift_name"`
+		ShiftStatus *string `json:"shift_status"`
 	}
 
-	if shifts.ShiftName != "" {
-		response.ShiftName = &shifts.ShiftName
+	var shiftInfo ShiftInfo
+
+	shiftQuery := `
+	SELECT  
+		employee_shifts.shift_id,  
+		employee_shifts.shift_date,  
+		shifts.start_time,  
+		shifts.end_time, 
+		shifts.shift_name, 
+		CASE  
+			WHEN employee_shifts.shift_id IS NOT NULL AND DATE(employee_shifts.shift_date) = CURRENT_DATE() AND ( 
+				(shifts.start_time <= shifts.end_time AND TIME(NOW()) BETWEEN shifts.start_time AND shifts.end_time) 
+				OR 
+				(shifts.start_time > shifts.end_time AND (TIME(NOW()) >= shifts.start_time OR TIME(NOW()) <= shifts.end_time)) 
+			) 
+			THEN 'Active Shift' 
+			WHEN employee_shifts.shift_id IS NOT NULL
+			THEN 'Not On Shift'
+			ELSE NULL
+		END AS shift_status 
+	FROM users
+	LEFT JOIN (
+		employee_shifts 
+		JOIN shifts ON employee_shifts.shift_id = shifts.id
+	) ON users.email = employee_shifts.user_email
+		AND (
+			DATE(employee_shifts.shift_date) = CURRENT_DATE() 
+			OR 
+			(DATE(employee_shifts.shift_date) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)  
+			AND shifts.start_time > shifts.end_time  
+			AND TIME(NOW()) < shifts.end_time)
+		)
+	WHERE users.email = ?
+	LIMIT 1
+	`
+
+	if err := DB.Raw(shiftQuery, response.Email).Scan(&shiftInfo).Error; err != nil {
+		fmt.Printf("Error fetching shift info: %v\n", err)
+	}
+
+	// Tetap mempertahankan respons yang sudah ada dengan tambahan informasi shift
+	if shiftInfo.ShiftName != "" {
+		response.ShiftName = &shiftInfo.ShiftName
+
+		// Tambahkan informasi shift status jika ada
+		if shiftInfo.ShiftStatus != nil {
+			response.ShiftStatus = shiftInfo.ShiftStatus
+		}
 	}
 
 	// Avatar Base Url
-	baseURL := "http://db:8080/storage/images/"
+	baseURL := "http://localhost:8080/storage/images/"
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL
@@ -156,68 +186,47 @@ func GetProfile(c *gin.Context) {
 
 // @GET Users Logs
 func GetUsersLogs(c *gin.Context) {
-	var rawLogs []struct {
-		UserEmail string    `json:"user_email"`
-		LoginTime time.Time `json:"login_time"`
-	}
+	DB := database.GetDB()
+	var userLogs []types.UserLogResponse
 
-	var users []types.UserResponseWithoutToken
-
-	if err := DB.Table("user_logs").Select("*").Scan(&rawLogs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+	if err := DB.Table("user_logs").
+		Select("user_logs.login_time, users.avatar, users.email, users.name, users.role, users.avatar, users.status, user_logs.shift_name").
+		Joins("JOIN users ON user_logs.user_email = users.email AND DATE()").
+		Find(&userLogs).
+		Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Data User Logs",
+		})
 		return
 	}
 
-	if err := DB.Table("users").
-		Select("users.*").
-		Joins("JOIN user_logs ON user_logs.user_email = users.email").
-		Scan(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
-	}
+	formattedUserLogs := make([]map[string]interface{}, 0)
+	baseURL := "http://localhost:8080/storage/images/"
 
-	// Buat response dengan menggabungkan user info dan log waktu login
-	var response []struct {
-		types.UserResponseWithoutToken
-		LoginDate string `json:"login_date"`
-		LoginTime string `json:"login_time"`
-	}
-
-	// Buat mapping email ke user agar lebih cepat saat pencocokan
-	userMap := make(map[string]types.UserResponseWithoutToken)
-	for _, user := range users {
-		userMap[user.Email] = user
-	}
-
-	// Gabungkan rawLogs dengan userMap
-	for _, log := range rawLogs {
-		userData, exists := userMap[log.UserEmail]
-		if !exists {
-			// Jika user tidak ditemukan, skip
-			continue
-		}
-
-		response = append(response, struct {
-			types.UserResponseWithoutToken
-			LoginDate string `json:"login_date"`
-			LoginTime string `json:"login_time"`
-		}{
-			UserResponseWithoutToken: userData,
-			LoginDate:                log.LoginTime.Format("2006-01-02"),
-			LoginTime:                log.LoginTime.Format("15:04:05"),
+	for _, user := range userLogs {
+		formattedUserLogs = append(formattedUserLogs, map[string]interface{}{
+			"email":      user.Email,
+			"name":       user.Name,
+			"role":       user.Role,
+			"avatar":     baseURL + *user.Avatar,
+			"shift_name": user.ShiftName,
+			"status":     user.Status,
+			"login_date": user.LoginTime.Format("2006-01-02"),
+			"login_time": user.LoginTime.Format("15:04:05"),
 		})
 	}
 
-	// Kirim response ke client
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "User Logs retrieved successfully",
-		"users":   response,
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Successfully Get Data User Logs",
+		Data:    formattedUserLogs,
 	})
 }
 
 // @POST Send OTP
 func SendOTP(c *gin.Context) {
+	DB := database.GetDB()
 	var users types.UserBody
 
 	if err := c.ShouldBindJSON(&users); err != nil {
@@ -293,38 +302,9 @@ func SendOTP(c *gin.Context) {
 	})
 }
 
-func ConnectMikrotik(c *gin.Context) {
-	client, err := routeros.Dial("45.149.93.122:8736", "netpro", "netpro")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to MikroTik", "detail": err.Error()})
-		return
-	}
-	defer client.Close()
-
-	res, err := client.Run("/interface/print")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to run command", "detail": err.Error()})
-		return
-	}
-
-	// Format hasil untuk JSON
-	interfaces := []map[string]string{}
-	for _, entry := range res.Re {
-		row := map[string]string{}
-		for key, value := range entry.Map {
-			row[key] = value
-		}
-		interfaces = append(interfaces, row)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":     "success",
-		"interfaces": interfaces,
-	})
-}
-
 // @POST Verify OTP
 func VerifyOTP(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		Email string `json:"email"`
 		OTP   string `json:"otp"`
@@ -360,35 +340,6 @@ func VerifyOTP(c *gin.Context) {
 		return
 	}
 
-	// Buat record login
-	LoginRecord := struct {
-		UserEmail string    `json:"user_email"`
-		LoginTime time.Time `json:"login_time"`
-		OTP       string    `json:"OTP"`
-	}{
-		UserEmail: user.Email,
-		LoginTime: time.Now(),
-		OTP:       *otpNow,
-	}
-
-	if err := DB.Table("user_logs").Create(&LoginRecord).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: err.Error(),
-			Data:    nil,
-		})
-		return
-	}
-
-	response := types.UserResponse{
-		ID:     user.ID,
-		Email:  user.Email,
-		Name:   user.Name,
-		Role:   user.Role,
-		Status: *user.Status,
-		Token:  user.Token,
-	}
-
 	// Cek shift saat ini
 	var shifts struct {
 		ShiftName string `json:"shift_name"`
@@ -403,8 +354,36 @@ func VerifyOTP(c *gin.Context) {
 		fmt.Printf("Error fetching shifts: %v\n", err)
 	}
 
-	if shifts.ShiftName != "" {
-		response.ShiftName = &shifts.ShiftName
+	// Buat record login
+	LoginRecord := struct {
+		UserEmail string    `json:"user_email"`
+		LoginTime time.Time `json:"login_time"`
+		ShiftName string    `json:"shift_name"`
+		OTP       string    `json:"OTP"`
+	}{
+		UserEmail: user.Email,
+		LoginTime: time.Now(),
+		ShiftName: shifts.ShiftName,
+		OTP:       *otpNow,
+	}
+
+	if err := DB.Table("user_logs").Create(&LoginRecord).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	response := types.UserResponse{
+		ID:        user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		Role:      user.Role,
+		Status:    *user.Status,
+		Token:     user.Token,
+		ShiftName: &shifts.ShiftName,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -416,6 +395,7 @@ func VerifyOTP(c *gin.Context) {
 
 // @POST Logout
 func Logout(c *gin.Context) {
+	DB := database.GetDB()
 	email := c.Query("email")
 
 	if email == "" {
@@ -479,6 +459,7 @@ func Logout(c *gin.Context) {
 
 // @POST Rehistrasi
 func Registration(c *gin.Context) {
+	DB := database.GetDB()
 	var users types.UserPost
 
 	if err := c.ShouldBindJSON(&users); err != nil {
@@ -506,6 +487,7 @@ func Registration(c *gin.Context) {
 
 // @PUT User Profile
 func EditProfile(c *gin.Context) {
+	DB := database.GetDB()
 	var response types.UserResponseWithoutRole
 	token := c.GetHeader("Authorization")
 	query := DB.Table("users").Where("users.token = ?", token).First(&response)
@@ -591,7 +573,7 @@ func EditProfile(c *gin.Context) {
 
 // @POST Edit Status User
 func UpdateStatusUser(c *gin.Context) {
-
+	DB := database.GetDB()
 	var input struct {
 		Status string `json:"status"`
 	}
@@ -659,8 +641,4 @@ func UpdateStatusUser(c *gin.Context) {
 			"user": response,
 		},
 	})
-}
-
-func init() {
-	InitDB()
 }

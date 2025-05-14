@@ -22,7 +22,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Periksa apakah Token ada di database
 		var user types.User
 		if err := database.DB.Where("token = ?", token).First(&user).Error; err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid or expired token"})
@@ -30,7 +29,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Simpan user dalam context agar bisa diakses di endpoint
 		c.Set("user", user)
 		c.Next()
 	}

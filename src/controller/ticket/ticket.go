@@ -2,30 +2,16 @@ package ticket
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"net/http"
 	"strings"
 	"time"
 
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
-
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Connected to MySQL")
-}
 
 func toSolvedTime(duration time.Duration) *string {
 	h := int(duration.Hours())
@@ -36,6 +22,7 @@ func toSolvedTime(duration time.Duration) *string {
 }
 
 func CheckTicketsDeadline(c *gin.Context) {
+	DB := database.GetDB()
 	var tickets []types.TicketsResponseAll
 
 	if err := DB.Table("tickets").Select("*").Order("priority DESC").Find(&tickets).Error; err != nil {
@@ -133,9 +120,12 @@ func CheckTicketsDeadline(c *gin.Context) {
 
 // @GET
 func GetAllTickets(c *gin.Context) {
+	DB := database.GetDB()
 	var tickets []types.TicketsResponseAll
-
-	if err := DB.Table("tickets").Select("*").Order("priority DESC").Find(&tickets).Error; err != nil {
+	if err := DB.Table("tickets").
+		Select("*").
+		Order("priority DESC").
+		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
@@ -145,63 +135,111 @@ func GetAllTickets(c *gin.Context) {
 	}
 
 	baseURL := "http://localhost:8080/storage/images/"
+	emailSet := make(map[string]bool)
+
+	for _, ticket := range tickets {
+		emailSet[ticket.UserEmail] = true
+	}
+
+	var emails []string
+	for email := range emailSet {
+		emails = append(emails, email)
+	}
+
+	var users []types.TicketsCreator
+	if err := DB.Table("users").
+		Select("email, name, avatar").
+		Where("email IN ?", emails).
+		Scan(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to fetch users",
+			Data:    nil,
+		})
+		return
+	}
+
+	userMap := make(map[string]types.TicketsCreator)
+	for _, user := range users {
+		if user.Avatar != "" {
+			user.Avatar = baseURL + user.Avatar
+		}
+		userMap[user.Email] = user
+	}
+
+	// 1. Ambil semua tracking_id dari tickets
+	var trackingIDs []string
+	for _, t := range tickets {
+		trackingIDs = append(trackingIDs, t.TrackingID)
+	}
+
+	// 2. Ambil last reply per tiket (latest update_at)
+	var lastRepliesRaw []struct {
+		TicketsID string    `json:"tickets_id"`
+		UserEmail string    `json:"user_email"`
+		NewStatus string    `json:"new_status"`
+		UpdatedAt time.Time `json:"update_at"`
+	}
+	DB.Raw(`
+	SELECT ut.*
+	FROM user_tickets ut
+	INNER JOIN (
+		SELECT tickets_id, MAX(update_at) AS max_update
+		FROM user_tickets
+		WHERE tickets_id IN ?
+		GROUP BY tickets_id
+	) latest ON ut.tickets_id = latest.tickets_id AND ut.update_at = latest.max_update`, trackingIDs).Scan(&lastRepliesRaw)
+
+	// 3. Buat map tickets_id -> reply
+	lastReplyMap := make(map[string]struct {
+		UserEmail string
+		NewStatus string
+		UpdatedAt time.Time
+	})
+	lastReplyEmails := make(map[string]bool)
+	for _, r := range lastRepliesRaw {
+		lastReplyMap[r.TicketsID] = struct {
+			UserEmail string
+			NewStatus string
+			UpdatedAt time.Time
+		}{r.UserEmail, r.NewStatus, r.UpdatedAt}
+		if r.UserEmail != "" {
+			lastReplyEmails[r.UserEmail] = true
+		}
+	}
+
+	// 4. Ambil data user yang jadi last replier
+	var lastRepliers []types.TicketsCreator
+	if len(lastReplyEmails) > 0 {
+		var emails []string
+		for e := range lastReplyEmails {
+			emails = append(emails, e)
+		}
+
+		DB.Table("users").
+			Select("email, name, avatar").
+			Where("email IN ?", emails).
+			Scan(&lastRepliers)
+	}
+
+	// 5. Buat map email -> user (last replier)
+	lastReplierMap := make(map[string]types.TicketsCreator)
+	for _, user := range lastRepliers {
+		if user.Avatar != "" {
+			user.Avatar = baseURL + user.Avatar
+		}
+		lastReplierMap[user.Email] = user
+	}
+
+	// 6. Susun hasil akhir
 	var formattedTickets []map[string]interface{}
 	for _, ticket := range tickets {
-		var ticketCreator types.TicketsCreator
+		ticketCreator := userMap[ticket.UserEmail]
 
-		if err := DB.Table("users").
-			Select("email, name, avatar").
-			Where("email = ?", ticket.UserEmail).
-			Scan(&ticketCreator).Error; err != nil {
-			return
-		}
-
-		if ticketCreator.Avatar != "" {
-			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
-		}
-
-		var lastReply struct {
-			UserEmail string    `json:"user_email"`
-			NewStatus string    `json:"new_status"`
-			UpdatedAt time.Time `json:"update_at"`
-		}
-
-		if err := DB.Table("user_tickets").
-			Select("user_email, new_status, update_at").
-			Where("tickets_id = ?", ticket.TrackingID).
-			Order("update_at DESC").
-			Limit(1).
-			Scan(&lastReply).Error; err != nil {
-			lastReply = struct {
-				UserEmail string    `json:"user_email"`
-				NewStatus string    `json:"new_status"`
-				UpdatedAt time.Time `json:"update_at"`
-			}{}
-		}
-
-		// Get last replier's information
-		var lastReplier *struct {
-			Email  string `json:"email"`
-			Name   string `json:"name"`
-			Avatar string `json:"avatar"`
-		}
-
-		if lastReply.UserEmail != "" {
-			var replierInfo struct {
-				Email  string `json:"email"`
-				Name   string `json:"name"`
-				Avatar string `json:"avatar"`
-			}
-
-			if err := DB.Table("users").
-				Select("email, name, avatar").
-				Where("email = ?", lastReply.UserEmail).
-				Scan(&replierInfo).Error; err == nil {
-
-				if replierInfo.Avatar != "" {
-					replierInfo.Avatar = baseURL + replierInfo.Avatar
-				}
-				lastReplier = &replierInfo
+		var lastReplier *types.TicketsCreator
+		if lr, ok := lastReplyMap[ticket.TrackingID]; ok {
+			if user, ok := lastReplierMap[lr.UserEmail]; ok {
+				lastReplier = &user
 			}
 		}
 
@@ -237,6 +275,7 @@ func GetAllTickets(c *gin.Context) {
 // @GET
 func GetTicketsLogs(c *gin.Context) {
 	var ticketLogs []types.TicketsLogsRaw
+	DB := database.GetDB()
 
 	if err := DB.Table("user_tickets").
 		Select(`
@@ -258,10 +297,10 @@ func GetTicketsLogs(c *gin.Context) {
 	}
 
 	// Ubah ke format yang diinginkan
-	var formattedLogs []types.TicketsLogs
+	baseURL := "http://localhost:8080/storage/images/"
+	formattedLogs := make([]types.TicketsLogs, 0, len(ticketLogs))
 	for _, log := range ticketLogs {
 
-		baseURL := "http://localhost:8080/storage/images/"
 		if log.UserAvatar != "" {
 			log.UserAvatar = baseURL + log.UserAvatar
 		}
@@ -299,6 +338,7 @@ func GetTicketsLogs(c *gin.Context) {
 func GetTicketsByDateRange(c *gin.Context) {
 	startDateStr := c.Query("start_date")
 	endDateStr := c.Query("end_date")
+	DB := database.GetDB()
 
 	if startDateStr == "" || endDateStr == "" {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
@@ -331,7 +371,7 @@ func GetTicketsByDateRange(c *gin.Context) {
 	}
 
 	tickets := make([]types.TicketsResponseAll, 0)
-	if err := DB.Table("tickets").Where("hari_masuk BETWEEN ? AND ?", startDate.String(), endDate.String()).Order("tickets.created_at DESC").Find(&tickets).Error; err != nil {
+	if err := DB.Table("tickets").Where("hari_masuk BETWEEN ? AND ?", startDate.String(), endDate.String()).Order("priority DESC").Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tickets: " + err.Error()})
 		return
 	}
@@ -429,6 +469,7 @@ func GetTicketsByDateRange(c *gin.Context) {
 
 // @GET
 func GetTicketsByCategory(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		Category string `json:"category"`
 	}
@@ -454,6 +495,7 @@ func GetTicketsByCategory(c *gin.Context) {
 
 // @GET
 func GetTicketsByStatus(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		Status string `json:"status"`
 	}
@@ -479,6 +521,7 @@ func GetTicketsByStatus(c *gin.Context) {
 
 // @GET
 func GetTicketsByPriority(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		Priority string `json:"priority"`
 	}
@@ -504,6 +547,7 @@ func GetTicketsByPriority(c *gin.Context) {
 
 // @GET
 func GenerateReport(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		ProductsName string `json:"products_name" binding:"required"`
 		StartDate    string `json:"start_date" binding:"required"`
@@ -679,6 +723,7 @@ func GenerateReport(c *gin.Context) {
 
 // @POST
 func AddTicket(c *gin.Context) {
+	DB := database.GetDB()
 	// Input structure with proper validation tags
 	var inputJSON struct {
 		HariMasuk       string `json:"hari_masuk" binding:"required"`
@@ -784,7 +829,10 @@ func AddTicket(c *gin.Context) {
 	}
 
 	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
@@ -812,14 +860,23 @@ func generateTrackingID(productName string) string {
 
 // @GET
 func GetTicketByID(c *gin.Context) {
+	DB := database.GetDB()
 	var tickets []types.TicketsResponseAll
 	var historyTickets []types.TicketsLogsRaw
 
-	if err := DB.Table("tickets").Select("*").Order("tickets.created_at DESC").Where("tracking_id = ?", c.Param("tracking_id")).Find(&tickets).Error; err != nil {
+	if err := DB.Table("tickets").Select("*").Order("tickets.created_at  DESC").Where("tracking_id = ?", c.Param("tracking_id")).Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
 			Data:    nil,
+		})
+		return
+	}
+
+	if len(tickets) == 0 {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Tickets Not Found",
 		})
 		return
 	}
@@ -874,16 +931,26 @@ func GetTicketByID(c *gin.Context) {
 		})
 	}
 
+	emailArray := make([]string, len(tickets))
+	for i, ticket := range tickets {
+		emailArray[i] = ticket.UserEmail
+	}
+
+	var ticketCreator types.TicketsCreator
+
+	if err := DB.Table("users").
+		Select("email, name, avatar").
+		Where("email in (?)", emailArray).
+		Scan(&ticketCreator).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
 	var formattedTickets map[string]interface{}
 	for _, ticket := range tickets {
-		var ticketCreator types.TicketsCreator
-
-		if err := DB.Table("users").
-			Select("email, name, avatar").
-			Where("email = ?", ticket.UserEmail).
-			Scan(&ticketCreator).Error; err != nil {
-			return
-		}
 
 		if ticketCreator.Avatar != "" {
 			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
@@ -908,7 +975,6 @@ func GetTicketByID(c *gin.Context) {
 			}{}
 		}
 
-		// Get last replier's information
 		var lastReplier *struct {
 			Email  string `json:"email"`
 			Name   string `json:"name"`
@@ -967,6 +1033,8 @@ func GetTicketByID(c *gin.Context) {
 
 // @POST
 func UpdateStatus(c *gin.Context) {
+	DB := database.GetDB()
+
 	var input struct {
 		Status string `json:"status"`
 	}
@@ -1065,6 +1133,7 @@ func UpdateStatus(c *gin.Context) {
 
 // @POST
 func UpdateTicket(c *gin.Context) {
+	DB := database.GetDB()
 	var input types.UpdateTicketInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1145,6 +1214,7 @@ func UpdateTicket(c *gin.Context) {
 
 // @DELETE
 func DeleteTicket(c *gin.Context) {
+	DB := database.GetDB()
 	var ticket types.Tickets
 	if err := DB.Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "Ticket not found"})
@@ -1159,6 +1229,72 @@ func DeleteTicket(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Ticket deleted successfully"})
 }
 
-func init() {
-	InitDB()
+func HandOverTicket(c *gin.Context) {
+	DB := database.GetDB()
+	query := `
+	SELECT 
+  tickets.tracking_id, 
+  users.email, 
+  shifts.shift_name,
+  tickets.status,
+  tickets.created_at,
+  tickets.category_name,
+  tickets.user_name,
+  tickets.subject,
+  tickets.PIC,
+  tickets.no_whatsapp,
+  tickets.priority,
+shifts.id AS shifts_id
+FROM tickets
+JOIN users ON tickets.user_email = users.email
+JOIN employee_shifts ON users.email = employee_shifts.user_email
+JOIN shifts ON employee_shifts.shift_id = shifts.id
+WHERE tickets.status != 'Resolved'
+  AND employee_shifts.shift_id = (
+    SELECT id 
+    FROM shifts
+    WHERE (
+      (start_time < end_time AND NOW() BETWEEN start_time AND end_time)
+      OR
+      (start_time > end_time AND (NOW() >= start_time OR CURTIME() <= end_time))
+    )
+    LIMIT 1
+  )
+GROUP BY tickets.tracking_id, shifts.shift_name, shifts.id
+ORDER BY 
+  CASE tickets.priority
+    WHEN 'High' THEN 1
+    WHEN 'Medium' THEN 2
+    WHEN 'Low' THEN 3
+    ELSE 4
+  END,
+  tickets.created_at ASC
+	`
+	var ticket []struct {
+		TrackingID   string `json:"tracking_id"`
+		Status       string `json:"status"`
+		UserName     string `json:"user_name"`
+		Subject      string `json:"subject"`
+		PIC          string `json:"PIC"`
+		NoWhatsapp   string `json:"no_whatsapp"`
+		Priority     string `json:"priority"`
+		CategoryName string `json:"category_name"`
+		Email        string `json:"email"`
+		ShiftName    string `json:"shift_name"`
+		ShiftsId     string `json:"shifts_id"`
+	}
+
+	if err := DB.Raw(query).Scan(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Succesfuly Get Ticket",
+		Data:    ticket,
+	})
 }

@@ -1,32 +1,18 @@
 package shifts
 
 import (
-	"fmt"
-	"log"
+	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
-
-var DB *gorm.DB
-
-func InitDB() {
-	var err error
-	dsn := "root:@tcp(db:3306)/commandcenter?charset=utf8mb4&parseTime=True&loc=Local"
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("could not connect to the database: %v", err)
-	}
-	fmt.Println("Connected to MySQL")
-}
 
 // @ GET User Shifts
 func GetUserShifts(c *gin.Context) {
+	DB := database.GetDB()
 	var shifts []types.ShiftResponse
 
 	if err := DB.Table("employee_shifts").
@@ -80,6 +66,8 @@ func GetUserShifts(c *gin.Context) {
 
 // @ GET Shifts By Id
 func GetShiftById(c *gin.Context) {
+	DB := database.GetDB()
+
 	type rawShiftResponse struct {
 		ID        uint      `json:"id"`
 		ShiftID   uint      `json:"shift_id"`
@@ -123,6 +111,7 @@ func GetShiftById(c *gin.Context) {
 
 // @ GET ALL SHIFTS
 func GetAllShifts(c *gin.Context) {
+	DB := database.GetDB()
 	var shifts []types.Shift
 
 	if err := DB.Find(&shifts).Error; err != nil {
@@ -139,6 +128,7 @@ func GetAllShifts(c *gin.Context) {
 
 // @ GET Shift Logs
 func GetShiftLogs(c *gin.Context) {
+	DB := database.GetDB()
 	var shiftLogs []types.ShiftLogs
 
 	if err := DB.Find(&shiftLogs).Error; err != nil {
@@ -151,6 +141,7 @@ func GetShiftLogs(c *gin.Context) {
 
 // @ POST Shifts
 func AddShift(c *gin.Context) {
+	DB := database.GetDB()
 	var bodyShift types.ShiftRequest
 
 	if err := c.ShouldBindJSON(&bodyShift); err != nil {
@@ -198,6 +189,7 @@ func AddShift(c *gin.Context) {
 
 // @ DELETE Shifts
 func DeleteShift(c *gin.Context) {
+	DB := database.GetDB()
 	shiftID := c.Param("id")
 	var shift types.EmployeeShift
 
@@ -221,6 +213,7 @@ func DeleteShift(c *gin.Context) {
 
 // @ PUT Shifts
 func UpdateShift(c *gin.Context) {
+	DB := database.GetDB()
 	shiftID := c.Param("id")
 	var shift types.EmployeeShift
 
@@ -300,6 +293,7 @@ func UpdateShift(c *gin.Context) {
 
 // @POST Export Shift
 func ExportShifts(c *gin.Context) {
+	DB := database.GetDB()
 	var input struct {
 		Email     []string `json:"email" binding:"required"`
 		StartDate string   `json:"start_date" binding:"required"`
@@ -403,6 +397,107 @@ func ExportShifts(c *gin.Context) {
 	})
 }
 
-func init() {
-	InitDB()
+func GetHandoverTickets(c *gin.Context) {
+	DB := database.GetDB()
+	now := time.Now()
+	_, _, prevShiftStart, prevShiftEnd := GetShiftTimes(now)
+
+	type HandoverTicket struct {
+		ID            uint       `json:"id"`
+		Subject       string     `json:"subject"`
+		DetailKendala string     `json:"detail_kendala"`
+		Status        string     `json:"status"`
+		Priority      string     `json:"priority"`
+		UserEmail     string     `json:"user_email"`
+		CreatedAt     time.Time  `json:"created_at"`
+		DueDate       *time.Time `json:"due_date,omitempty"`
+	}
+
+	var handoverTickets []HandoverTicket
+	if err := DB.Table("tickets").
+		Select("id, subject, detail_kendala, status, priority, user_email, created_at, due_date").
+		Where("status != ?", "Resolved").
+		Where("created_at BETWEEN ? AND ?", prevShiftStart, prevShiftEnd).
+		Order("created_at ASC").
+		Scan(&handoverTickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Failed to retrieve handover tickets",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	// Format waktu agar cocok dengan FE
+	type FormattedHandoverTicket struct {
+		ID            uint    `json:"id"`
+		Subject       string  `json:"subject"`
+		DetailKendala string  `json:"detail_kendala"`
+		Status        string  `json:"status"`
+		Priority      string  `json:"priority"`
+		UserEmail     string  `json:"user_email"`
+		CreatedAt     string  `json:"created_at"`
+		DueDate       *string `json:"due_date,omitempty"`
+	}
+
+	var formatted []FormattedHandoverTicket
+	for _, t := range handoverTickets {
+		var due *string
+		if t.DueDate != nil {
+			formattedDue := t.DueDate.Format("2006-01-02")
+			due = &formattedDue
+		}
+
+		formatted = append(formatted, FormattedHandoverTicket{
+			ID:            t.ID,
+			Subject:       t.Subject,
+			DetailKendala: t.DetailKendala,
+			Status:        t.Status,
+			Priority:      t.Priority,
+			UserEmail:     t.UserEmail,
+			CreatedAt:     t.CreatedAt.Format("2006-01-02 15:04:05"),
+			DueDate:       due,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Handover tickets retrieved successfully",
+		"data":    formatted,
+	})
+}
+
+func GetShiftTimes(now time.Time) (shiftStart, shiftEnd, prevShiftStart, prevShiftEnd time.Time) {
+	loc := now.Location()
+
+	switch {
+	case now.Hour() >= 7 && now.Hour() < 14:
+		// Shift 1 sekarang, Shift 3 kemarin malam
+		shiftStart = time.Date(now.Year(), now.Month(), now.Day(), 7, 0, 0, 0, loc)
+		shiftEnd = time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, loc)
+		prevShiftStart = shiftStart.Add(-8 * time.Hour)
+		prevShiftEnd = shiftStart
+
+	case now.Hour() >= 14 && now.Hour() < 23:
+		// Shift 2 sekarang, Shift 1 sebelumnya
+		shiftStart = time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, loc)
+		shiftEnd = time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, loc)
+		prevShiftStart = shiftStart.Add(-8 * time.Hour)
+		prevShiftEnd = shiftStart
+
+	default:
+		// Shift 3 sekarang, Shift 2 sebelumnya
+		if now.Hour() < 7 {
+			// antara 00:00 - 07:00 (berarti shift 3 dimulai malam kemarin)
+			shiftStart = time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, loc).Add(-24 * time.Hour)
+			shiftEnd = time.Date(now.Year(), now.Month(), now.Day(), 7, 0, 0, 0, loc)
+		} else {
+			// 23:00 - 00:00
+			shiftStart = time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, loc)
+			shiftEnd = time.Date(now.Year(), now.Month(), now.Day(), 7, 0, 0, 0, loc).Add(24 * time.Hour)
+		}
+		prevShiftStart = shiftStart.Add(-8 * time.Hour)
+		prevShiftEnd = shiftStart
+	}
+	return
 }

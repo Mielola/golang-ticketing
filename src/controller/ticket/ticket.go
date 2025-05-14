@@ -1271,17 +1271,18 @@ ORDER BY
   tickets.created_at ASC
 	`
 	var ticket []struct {
-		TrackingID   string `json:"tracking_id"`
-		Status       string `json:"status"`
-		UserName     string `json:"user_name"`
-		Subject      string `json:"subject"`
-		PIC          string `json:"PIC"`
-		NoWhatsapp   string `json:"no_whatsapp"`
-		Priority     string `json:"priority"`
-		CategoryName string `json:"category_name"`
-		Email        string `json:"email"`
-		ShiftName    string `json:"shift_name"`
-		ShiftsId     string `json:"shifts_id"`
+		TrackingID   string    `json:"tracking_id"`
+		CreatedAt    time.Time `json:"created_at"`
+		Status       string    `json:"status"`
+		UserName     string    `json:"user_name"`
+		Subject      string    `json:"subject"`
+		PIC          string    `json:"PIC"`
+		NoWhatsapp   string    `json:"no_whatsapp"`
+		Priority     string    `json:"priority"`
+		CategoryName string    `json:"category_name"`
+		Email        string    `json:"email"`
+		ShiftName    string    `json:"shift_name"`
+		ShiftsId     string    `json:"shifts_id"`
 	}
 
 	if err := DB.Raw(query).Scan(&ticket).Error; err != nil {

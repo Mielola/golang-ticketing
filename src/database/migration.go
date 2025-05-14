@@ -24,9 +24,9 @@ func MigrateDB() {
 		&models.ExportLog{},
 		&models.Note{},
 	)
-	db.Exec("ALTER TABLE shifts MODIFY COLUMN start_time TIME NOT NULL")
-	db.Exec("ALTER TABLE shifts MODIFY COLUMN end_time TIME NOT NULL")
-	db.Exec("ALTER TABLE tickets MODIFY COLUMN waktu_masuk TIME NOT NULL")
+	db.Exec("ALTER TABLE shifts MODIFY COLUMN start_time TIME")
+	db.Exec("ALTER TABLE shifts MODIFY COLUMN end_time TIME")
+	db.Exec("ALTER TABLE tickets MODIFY COLUMN waktu_masuk TIME")
 	db.Exec("ALTER TABLE tickets MODIFY COLUMN waktu_respon TIME DEFAULT NULL")
 	if err != nil {
 		log.Fatal("Gagal melakukan migrasi:", err)

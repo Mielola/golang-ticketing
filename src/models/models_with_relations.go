@@ -27,12 +27,10 @@ type User struct {
 	Tickets        []Ticket        `gorm:"foreignKey:UserEmail;references:Email"`
 }
 
-// TableName specifies the table name for User
 func (User) TableName() string {
 	return "users"
 }
 
-// Shift represents shifts table
 type Shift struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement"`
 	ShiftName string    `gorm:"type:varchar(100);not null"`
@@ -55,7 +53,7 @@ type EmployeeShift struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement"`
 	UserEmail string    `gorm:"type:varchar(255);not null;index"`
 	ShiftID   uint64    `gorm:"not null;index"`
-	ShiftDate time.Time `gorm:"type:date;not null"` // Perbaikan: gunakan type:date untuk tanggal
+	ShiftDate time.Time `gorm:"type:date;not null"`
 	CreatedAt time.Time `gorm:"type:TIMESTAMP"`
 
 	User  User  `gorm:"foreignKey:UserEmail;references:Email"`
@@ -132,8 +130,8 @@ type Ticket struct {
 	DetailKendala   string     `gorm:"type:text;not null"`
 	PIC             string     `gorm:"column:PIC;type:varchar(255);default:null"`
 	ResponDiberikan string     `gorm:"type:text;default:null"`
-	CreatedAt       time.Time  `gorm:"type:TIMESTAMP;default:null"`
-	UpdatedAt       time.Time  `gorm:"type:TIMESTAMP;default:null"`
+	CreatedAt       time.Time  `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
+	UpdatedAt       time.Time  `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
 
 	User    User    `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Product Product `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

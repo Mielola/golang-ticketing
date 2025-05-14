@@ -46,7 +46,12 @@ func GetStatistik(c *gin.Context) {
 
 	var chartUserResolved []struct {
 		Name          string `json:"name"`
-		ResolvedCount string `json:"resolved_count"`
+		ResolvedCount int    `json:"resolved_count"`
+	}
+
+	var chartTicketProducts []struct {
+		Name         string `json:"name"`
+		TotalTickets int    `json:"total_tickets"`
 	}
 
 	type PriorityItem struct {
@@ -86,6 +91,19 @@ func GetStatistik(c *gin.Context) {
 			Success: false,
 			Message: "Start date, end date, status are required",
 			Data:    nil,
+		})
+		return
+	}
+
+	if err := DB.Table("products").
+		Select("products.name, COUNT(tickets.id) AS total_tickets").
+		Joins("LEFT JOIN tickets ON products.name = tickets.products_name").
+		Group("products.name").
+		Scan(&chartTicketProducts).
+		Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
 		})
 		return
 	}
@@ -164,6 +182,7 @@ func GetStatistik(c *gin.Context) {
 		Select("users.name,users.email,COUNT(CASE WHEN user_tickets.new_status = 'Resolved' THEN user_tickets.tickets_id END) AS resolved_count").
 		Joins("LEFT JOIN user_tickets ON users.email = user_tickets.user_email").
 		Group("users.name, users.email").
+		Order("resolved_count DESC").
 		Scan(&chartUserResolved).
 		Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -200,12 +219,13 @@ func GetStatistik(c *gin.Context) {
 		Success: true,
 		Message: "Report generated successfully",
 		Data: gin.H{
-			"ChartUserTickets":   userTickets,
-			"ChartTicketPeriode": ChartUserTicketsFormatted,
-			"ChartPriority":      priorityItems,
-			"ChartCategory":      categoryItems,
-			"CharUserRole":       charUserRole,
-			"ChartUserResolved":  chartUserResolved,
+			"ChartUserTickets":    userTickets,
+			"ChartTicketPeriode":  ChartUserTicketsFormatted,
+			"ChartPriority":       priorityItems,
+			"ChartCategory":       categoryItems,
+			"CharUserRole":        charUserRole,
+			"ChartUserResolved":   chartUserResolved,
+			"ChartTicketProducts": chartTicketProducts,
 		},
 	})
 }

@@ -1228,3 +1228,73 @@ func DeleteTicket(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Ticket deleted successfully"})
 }
+
+func HandOverTicket(c *gin.Context) {
+	DB := database.GetDB()
+	query := `
+	SELECT 
+  tickets.tracking_id, 
+  users.email, 
+  shifts.shift_name,
+  tickets.status,
+  tickets.created_at,
+  tickets.category_name,
+  tickets.user_name,
+  tickets.subject,
+  tickets.PIC,
+  tickets.no_whatsapp,
+  tickets.priority,
+shifts.id AS shifts_id
+FROM tickets
+JOIN users ON tickets.user_email = users.email
+JOIN employee_shifts ON users.email = employee_shifts.user_email
+JOIN shifts ON employee_shifts.shift_id = shifts.id
+WHERE tickets.status != 'Resolved'
+  AND employee_shifts.shift_id = (
+    SELECT id 
+    FROM shifts
+    WHERE (
+      (start_time < end_time AND NOW() BETWEEN start_time AND end_time)
+      OR
+      (start_time > end_time AND (NOW() >= start_time OR CURTIME() <= end_time))
+    )
+    LIMIT 1
+  )
+GROUP BY tickets.tracking_id, shifts.shift_name, shifts.id
+ORDER BY 
+  CASE tickets.priority
+    WHEN 'High' THEN 1
+    WHEN 'Medium' THEN 2
+    WHEN 'Low' THEN 3
+    ELSE 4
+  END,
+  tickets.created_at ASC
+	`
+	var ticket []struct {
+		TrackingID   string `json:"tracking_id"`
+		Status       string `json:"status"`
+		UserName     string `json:"user_name"`
+		Subject      string `json:"subject"`
+		PIC          string `json:"PIC"`
+		NoWhatsapp   string `json:"no_whatsapp"`
+		Priority     string `json:"priority"`
+		CategoryName string `json:"category_name"`
+		Email        string `json:"email"`
+		ShiftName    string `json:"shift_name"`
+		ShiftsId     string `json:"shifts_id"`
+	}
+
+	if err := DB.Raw(query).Scan(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Succesfuly Get Ticket",
+		Data:    ticket,
+	})
+}

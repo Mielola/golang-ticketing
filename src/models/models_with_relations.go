@@ -4,18 +4,18 @@ import "time"
 
 // User represents users table
 type User struct {
-	ID        uint64     `gorm:"primaryKey;autoIncrement"`
-	Name      string     `gorm:"type:varchar(255);not null"`
-	Email     string     `gorm:"type:varchar(255);uniqueIndex;not null"`
-	Password  string     `gorm:"type:varchar(255);not null"`
-	Avatar    string     `gorm:"type:varchar(255);default:default.jpg"`
-	Role      string     `gorm:"type:varchar(50);default:'pegawai';not null"`
-	Status    string     `gorm:"type:varchar(50);default:'offline';not null"`
-	OTP       string     `gorm:"column:OTP;type:varchar(100);default:null"`
-	Token     string     `gorm:"type:varchar(255);default:null"`
-	OTPActive bool       `gorm:"column:OTP_Active;default:false"`
-	CreatedAt *time.Time `gorm:"type:TIMESTAMP"`
-	UpdatedAt *time.Time `gorm:"type:TIMESTAMP"`
+	ID        uint64    `gorm:"primaryKey;autoIncrement"`
+	Name      string    `gorm:"type:varchar(255);not null"`
+	Email     string    `gorm:"type:varchar(255);uniqueIndex;not null"`
+	Password  string    `gorm:"type:varchar(255);not null"`
+	Avatar    string    `gorm:"type:varchar(255);default:default.jpg"`
+	Role      string    `gorm:"type:varchar(50);default:'pegawai';not null"`
+	Status    string    `gorm:"type:varchar(50);default:'offline';not null"`
+	OTP       string    `gorm:"column:OTP;type:varchar(100);default:null"`
+	Token     string    `gorm:"type:varchar(255);default:null"`
+	OTPActive bool      `gorm:"column:OTP_Active;default:false"`
+	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
+	UpdatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
 
 	// Relations
 	EmployeeShifts []EmployeeShift `gorm:"foreignKey:UserEmail;references:Email"`
@@ -38,7 +38,7 @@ type Shift struct {
 	ShiftName string    `gorm:"type:varchar(100);not null"`
 	StartTime time.Time `gorm:"type:TIME;not null"`
 	EndTime   time.Time `gorm:"type:TIME;not null"`
-	CreatedAt time.Time `gorm:"type:TIMESTAMP"`
+	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
 
 	// Relations
 	EmployeeShifts []EmployeeShift `gorm:"foreignKey:ShiftID"`

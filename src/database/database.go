@@ -15,7 +15,7 @@ const (
 	DBPassword = ""
 	DBHost     = "localhost"
 	DBPort     = "3306"
-	DBName     = "commandcenter3"
+	DBName     = "commandcenter4"
 )
 
 func InitDB() {

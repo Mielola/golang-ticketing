@@ -1,7 +1,7 @@
 package routes
 
 import (
-	export "my-gin-project/src/controller/Export"
+	"my-gin-project/src/controller/export"
 	"my-gin-project/src/controller/dashboard"
 	"my-gin-project/src/controller/notes"
 	"my-gin-project/src/controller/products"

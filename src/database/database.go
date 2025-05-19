@@ -13,9 +13,9 @@ var DB *gorm.DB
 const (
 	DBUser     = "root"
 	DBPassword = ""
-	DBHost     = "localhost"
+	DBHost     = "golang-ticketing-db"
 	DBPort     = "3306"
-	DBName     = "commandcenter3"
+	DBName     = "commandcenter"
 )
 
 func InitDB() {

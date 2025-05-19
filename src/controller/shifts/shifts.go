@@ -16,7 +16,7 @@ func GetUserShifts(c *gin.Context) {
 	var shifts []types.ShiftResponse
 
 	if err := DB.Table("employee_shifts").
-		Select("shifts.shift_name, employee_shifts.id, employee_shifts.shift_id, employee_shifts.user_email, employee_shifts.shift_date, users.name").
+		Select("shifts.shift_name, shifts.start_time, shifts.end_time, employee_shifts.id, employee_shifts.shift_id, employee_shifts.user_email, employee_shifts.shift_date, users.name").
 		Joins("JOIN shifts ON shifts.id = employee_shifts.shift_id").
 		Joins("JOIN users ON users.email = employee_shifts.user_email").
 		Find(&shifts).Error; err != nil {
@@ -31,6 +31,7 @@ func GetUserShifts(c *gin.Context) {
 		UserName  string `json:"name"`
 		ShiftName string `json:"shift_name"`
 		ShiftDate string `json:"shift_date"`
+		StartTime string `jsong:"start_time"`
 	}, len(shifts))
 
 	for i, shift := range shifts {
@@ -41,6 +42,7 @@ func GetUserShifts(c *gin.Context) {
 			UserName  string `json:"name"`
 			ShiftName string `json:"shift_name"`
 			ShiftDate string `json:"shift_date"`
+			StartTime string `jsong:"start_time"`
 		}{
 			ID:        shift.ID,
 			ShiftId:   shift.ShiftId,
@@ -53,6 +55,13 @@ func GetUserShifts(c *gin.Context) {
 					return shift.ShiftDate
 				}
 				return parsedDate.Format("2006-01-02")
+			}(),
+			StartTime: func() string {
+				parsedTime, err := time.Parse("15:04:05", shift.StartTime)
+				if err != nil {
+					return shift.StartTime
+				}
+				return parsedTime.Format("15:04") // Hasil: "07:00"
 			}(),
 		}
 	}

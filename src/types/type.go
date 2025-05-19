@@ -259,6 +259,7 @@ type ShiftResponse struct {
 	Name      string `json:"name"`
 	ShiftName string `json:"shift_name"`
 	ShiftDate string `json:"shift_date"`
+	StartTime string `jsong:"start_time"`
 }
 
 type ShiftLogs struct {

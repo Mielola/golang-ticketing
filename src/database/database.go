@@ -13,7 +13,7 @@ var DB *gorm.DB
 const (
 	DBUser     = "root"
 	DBPassword = ""
-	DBHost     = "golang-ticketing-db"
+	DBHost     = "mysql-ticketing"
 	DBPort     = "3306"
 	DBName     = "commandcenter"
 )

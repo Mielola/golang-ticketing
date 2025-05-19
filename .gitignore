@@ -1,0 +1,26 @@
+# Binaries
+*.exe
+*.exe~
+*.out
+*.o
+
+# Logs
+*.log
+
+# Dependency directories
+vendor/
+node_modules/
+
+# IDE/editor settings
+.vscode/
+.idea/
+
+# Build output
+tmp/
+dist/
+bin/
+build/
+
+# Docker files
+docker-compose.yml
+Dockerfile

@@ -124,7 +124,7 @@ func GetAllTickets(c *gin.Context) {
 	var tickets []types.TicketsResponseAll
 	if err := DB.Table("tickets").
 		Select("*").
-		Order("priority DESC").
+		Order("priority DESC, status").
 		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -1233,59 +1233,63 @@ func HandOverTicket(c *gin.Context) {
 	DB := database.GetDB()
 	query := `
 	SELECT 
-  tickets.tracking_id, 
-  users.email, 
-  shifts.shift_name,
-  tickets.status,
-  tickets.created_at,
-  tickets.category_name,
-  tickets.user_name,
-  tickets.subject,
-  tickets.PIC,
-  tickets.no_whatsapp,
-  tickets.priority,
-shifts.id AS shifts_id
-FROM tickets
-JOIN users ON tickets.user_email = users.email
-JOIN employee_shifts ON users.email = employee_shifts.user_email
-JOIN shifts ON employee_shifts.shift_id = shifts.id
-WHERE tickets.status != 'Resolved'
-  AND employee_shifts.shift_id = (
-    SELECT id 
-    FROM shifts
-    WHERE (
-      (start_time < end_time AND NOW() BETWEEN start_time AND end_time)
-      OR
-      (start_time > end_time AND (NOW() >= start_time OR CURTIME() <= end_time))
-    )
-    LIMIT 1
-  )
-GROUP BY tickets.tracking_id, shifts.shift_name, shifts.id
-ORDER BY 
-  CASE tickets.priority
-    WHEN 'High' THEN 1
-    WHEN 'Medium' THEN 2
-    WHEN 'Low' THEN 3
-    ELSE 4
-  END,
-  tickets.created_at ASC
+		tickets.tracking_id, 
+		users.email, 
+		shifts.shift_name,
+		tickets.status,
+		tickets.created_at,
+		tickets.category_name,
+		tickets.user_name,
+		tickets.subject,
+		tickets.PIC,
+		tickets.no_whatsapp,
+		tickets.priority,
+		users.avatar,
+		shifts.id AS shifts_id
+	FROM tickets
+	JOIN users ON tickets.user_email = users.email
+	JOIN employee_shifts ON users.email = employee_shifts.user_email
+	JOIN shifts ON employee_shifts.shift_id = shifts.id
+	WHERE tickets.status != 'Resolved'
+	  AND employee_shifts.shift_id = (
+		SELECT id 
+		FROM shifts
+		WHERE (
+		  (start_time < end_time AND NOW() BETWEEN start_time AND end_time)
+		  OR
+		  (start_time > end_time AND (NOW() >= start_time OR CURTIME() <= end_time))
+		)
+		LIMIT 1
+	  )
+	GROUP BY tickets.tracking_id, shifts.shift_name, shifts.id
+	ORDER BY 
+	  CASE tickets.priority
+		WHEN 'High' THEN 1
+		WHEN 'Medium' THEN 2
+		WHEN 'Low' THEN 3
+		ELSE 4
+	  END,
+	  tickets.created_at ASC
 	`
-	var ticket []struct {
-		TrackingID   string    `json:"tracking_id"`
-		CreatedAt    time.Time `json:"created_at"`
-		Status       string    `json:"status"`
-		UserName     string    `json:"user_name"`
-		Subject      string    `json:"subject"`
-		PIC          string    `json:"PIC"`
-		NoWhatsapp   string    `json:"no_whatsapp"`
-		Priority     string    `json:"priority"`
-		CategoryName string    `json:"category_name"`
-		Email        string    `json:"email"`
-		ShiftName    string    `json:"shift_name"`
-		ShiftsId     string    `json:"shifts_id"`
+
+	// Struct untuk raw query
+	var rawTickets []struct {
+		TrackingID   string
+		CreatedAt    time.Time
+		Status       string
+		UserName     string
+		Avatar       string
+		Subject      string
+		PIC          string
+		NoWhatsapp   string
+		Priority     string
+		CategoryName string
+		Email        string
+		ShiftName    string
+		ShiftsId     string
 	}
 
-	if err := DB.Raw(query).Scan(&ticket).Error; err != nil {
+	if err := DB.Raw(query).Scan(&rawTickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
@@ -1293,9 +1297,55 @@ ORDER BY
 		return
 	}
 
+	// Struct untuk response final dengan CreatedAt sudah di-format
+	type TicketResponse struct {
+		TrackingID   string `json:"tracking_id"`
+		CreatedAt    string `json:"created_at"` // sudah di-format
+		Status       string `json:"status"`
+		UserName     string `json:"user_name"`
+		Avatar       string `json:"avatar"`
+		Subject      string `json:"subject"`
+		PIC          string `json:"PIC"`
+		NoWhatsapp   string `json:"no_whatsapp"`
+		Priority     string `json:"priority"`
+		CategoryName string `json:"category_name"`
+		Email        string `json:"email"`
+		ShiftName    string `json:"shift_name"`
+		ShiftsId     string `json:"shifts_id"`
+	}
+
+	// Format tanggal yang diinginkan
+	layout := "02-01-2006 15:04" // dd-mm-yyyy hh:mm
+	baseURL := "http://127.0.0.1:8080/storage/images/"
+
+	var tickets []TicketResponse
+
+	for _, t := range rawTickets {
+		avatar := t.Avatar
+		if avatar != "" && !strings.HasPrefix(avatar, "http") {
+			avatar = baseURL + avatar
+		}
+
+		tickets = append(tickets, TicketResponse{
+			TrackingID:   t.TrackingID,
+			CreatedAt:    t.CreatedAt.Format(layout),
+			Status:       t.Status,
+			UserName:     t.UserName,
+			Avatar:       avatar,
+			Subject:      t.Subject,
+			PIC:          t.PIC,
+			NoWhatsapp:   t.NoWhatsapp,
+			Priority:     t.Priority,
+			CategoryName: t.CategoryName,
+			Email:        t.Email,
+			ShiftName:    t.ShiftName,
+			ShiftsId:     t.ShiftsId,
+		})
+	}
+
 	c.JSON(http.StatusOK, types.ResponseFormat{
 		Success: true,
-		Message: "Succesfuly Get Ticket",
-		Data:    ticket,
+		Message: "Successfully Get Ticket",
+		Data:    tickets,
 	})
 }

@@ -31,5 +31,5 @@ func main() {
 	r.Static("/storage", "./storage")
 
 	// Menjalankan server
-	r.Run(":8081")
+	r.Run(":8089")
 }

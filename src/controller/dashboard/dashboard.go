@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
@@ -102,7 +103,11 @@ func GetDashboard(c *gin.Context) {
 	}
 
 	formattedUserLogs := make([]map[string]interface{}, 0)
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 
 	for _, user := range userLogs {
 		formattedUserLogs = append(formattedUserLogs, map[string]interface{}{

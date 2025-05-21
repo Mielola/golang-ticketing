@@ -11,9 +11,9 @@ import (
 var DB *gorm.DB
 
 const (
-	DBUser     = "kris"
-	DBPassword = "kris1234"
-	DBHost     = "db-invent-pelaporan"
+	DBUser     = "root"
+	DBPassword = ""
+	DBHost     = "mysql-ticketing"
 	DBPort     = "3306"
 	DBName     = "commandcenter"
 )

@@ -134,7 +134,11 @@ func GetAllTickets(c *gin.Context) {
 		return
 	}
 
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	emailSet := make(map[string]bool)
 
 	for _, ticket := range tickets {
@@ -297,7 +301,11 @@ func GetTicketsLogs(c *gin.Context) {
 	}
 
 	// Ubah ke format yang diinginkan
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	formattedLogs := make([]types.TicketsLogs, 0, len(ticketLogs))
 	for _, log := range ticketLogs {
 
@@ -376,7 +384,11 @@ func GetTicketsByDateRange(c *gin.Context) {
 		return
 	}
 
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	formattedTickets := make([]map[string]interface{}, 0)
 	for _, ticket := range tickets {
 		var ticketCreator types.TicketsCreator
@@ -901,7 +913,11 @@ func GetTicketByID(c *gin.Context) {
 		return
 	}
 
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 
 	// Ubah history tiket format
 	var formattedLogs []types.TicketsLogs
@@ -1314,9 +1330,12 @@ func HandOverTicket(c *gin.Context) {
 		ShiftsId     string `json:"shifts_id"`
 	}
 
-	// Format tanggal yang diinginkan
-	layout := "02-01-2006 15:04" // dd-mm-yyyy hh:mm
-	baseURL := "http://127.0.0.1:8080/storage/images/"
+	layout := "02-01-2006 15:04"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 
 	var tickets []TicketResponse
 

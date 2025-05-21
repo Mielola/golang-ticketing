@@ -110,7 +110,7 @@ func GetProfile(c *gin.Context) {
 		return
 	}
 
-	// Cek shift saat ini dengan query yang lebih lengkap
+	// Cek shift saat ini
 	type ShiftInfo struct {
 		ShiftID     uint    `json:"shift_id"`
 		ShiftDate   string  `json:"shift_date"`
@@ -160,18 +160,21 @@ func GetProfile(c *gin.Context) {
 		fmt.Printf("Error fetching shift info: %v\n", err)
 	}
 
-	// Tetap mempertahankan respons yang sudah ada dengan tambahan informasi shift
+	// Tambahkan shift info ke response
 	if shiftInfo.ShiftName != "" {
 		response.ShiftName = &shiftInfo.ShiftName
-
-		// Tambahkan informasi shift status jika ada
 		if shiftInfo.ShiftStatus != nil {
 			response.ShiftStatus = shiftInfo.ShiftStatus
 		}
 	}
 
-	// Avatar Base Url
-	baseURL := "http://localhost:8080/storage/images/"
+	// Ambil baseURL dinamis dari request
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
+
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL
@@ -202,7 +205,11 @@ func GetUsersLogs(c *gin.Context) {
 	}
 
 	formattedUserLogs := make([]map[string]interface{}, 0)
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 
 	for _, user := range userLogs {
 		formattedUserLogs = append(formattedUserLogs, map[string]interface{}{
@@ -553,7 +560,11 @@ func EditProfile(c *gin.Context) {
 	}
 
 	// Avatar Base Url
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL
@@ -628,7 +639,11 @@ func UpdateStatusUser(c *gin.Context) {
 	}
 
 	// Avatar Base Url
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL

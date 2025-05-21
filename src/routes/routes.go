@@ -1,8 +1,9 @@
 package routes
 
 import (
-	"my-gin-project/src/controller/export"
+	"my-gin-project/src/controller/category"
 	"my-gin-project/src/controller/dashboard"
+	"my-gin-project/src/controller/export"
 	"my-gin-project/src/controller/notes"
 	"my-gin-project/src/controller/products"
 	"my-gin-project/src/controller/shifts"
@@ -86,7 +87,14 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.POST("/shifts/export", shifts.ExportShifts)
 
 	// Products
-	protected_V1.GET("/products", products.GetProducts)
+	protected_V1.GET("/list-products", products.GetProducts)
+	protected_V1.GET("/products", products.GetAllProducts)
+	protected_V1.POST("/products", products.CreateProducts)
+	protected_V1.POST("/products/:id", products.UpdateProducts)
+	protected_V1.DELETE("/products/:id", products.DeleteProducts)
+
+	// Category
+	protected_V1.GET("/category", category.GetCategory)
 
 	// Statistik
 	protected_V1.POST("/statistik", statistik.GetStatistik)

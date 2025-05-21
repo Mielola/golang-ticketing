@@ -96,7 +96,11 @@ func ExportTickets(c *gin.Context) {
 		StatusTimestamps  []StatusTimestamp    `json:"status_timestamps"`
 	}
 
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	var formattedTickets []FormattedTicket
 
 	for _, ticket := range tickets {
@@ -329,7 +333,11 @@ func ExportUsers(c *gin.Context) {
 		StatusTimestamps  []StatusTimestamp    `json:"status_timestamps"`
 	}
 
-	baseURL := "http://localhost:8080/storage/images/"
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 	var formattedTickets []FormattedTicket
 
 	for _, ticket := range tickets {

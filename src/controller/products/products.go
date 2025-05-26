@@ -47,17 +47,29 @@ func CreateProducts(c *gin.Context) {
 		return
 	}
 
-	if err := DB.Table("products").Create(&input).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+	var existingProduct struct {
+		ID   string
+		Name string
+	}
+	if err := DB.Table("products").Where("name = ?", input.Name).First(&existingProduct).Error; err == nil {
+		c.JSON(http.StatusConflict, types.ResponseFormat{
 			Success: false,
-			Message: "Failed Create Products" + err.Error(),
+			Message: "Product with this name already exists",
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, types.ResponseFormat{
-		Success: false,
-		Message: "Success Create Products",
+	if err := DB.Table("products").Create(&input).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to create product: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, types.ResponseFormat{
+		Success: true,
+		Message: "Success create product",
 		Data:    input,
 	})
 }
@@ -92,6 +104,30 @@ func UpdateProducts(c *gin.Context) {
 	})
 }
 
+func GetProductByID(c *gin.Context) {
+	DB := database.GetDB()
+
+	id := c.Param("id")
+
+	var product struct {
+		Name string `json:"name"`
+	}
+
+	if err := DB.Table("products").Select("name").Where("id = ?", id).First(&product).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Product not found: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Success Get Product By ID",
+		Data:    product,
+	})
+}
+
 func GetAllProducts(c *gin.Context) {
 	DB := database.GetDB()
 	var products []struct {
@@ -103,6 +139,7 @@ func GetAllProducts(c *gin.Context) {
 	if err := DB.Table("products").Select("products.id, products.name, COUNT(tickets.id) AS total_tickets").
 		Joins("LEFT JOIN tickets ON tickets.products_name = products.name").
 		Group("products.name").
+		Order("products.id DESC").
 		Scan(&products).
 		Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{

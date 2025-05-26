@@ -85,16 +85,26 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/shifts-users", shifts.GetUserShifts)
 	protected_V1.DELETE("/shifts/:id", shifts.DeleteShift)
 	protected_V1.POST("/shifts/export", shifts.ExportShifts)
+	protected_V1.GET("/shifts-time", shifts.GetShiftTime)
+	protected_V1.GET("/shifts-time/:id", shifts.GetShiftTimeById)
+	protected_V1.POST("/shifts-time", shifts.CreateShiftTime)
+	protected_V1.POST("/shifts-time/:id", shifts.UpdateShiftTime)
+	protected_V1.DELETE("/shifts-time/:id", shifts.DeleteShiftTime)
 
 	// Products
 	protected_V1.GET("/list-products", products.GetProducts)
 	protected_V1.GET("/products", products.GetAllProducts)
+	protected_V1.GET("/products/:id", products.GetProductByID)
 	protected_V1.POST("/products", products.CreateProducts)
 	protected_V1.POST("/products/:id", products.UpdateProducts)
 	protected_V1.DELETE("/products/:id", products.DeleteProducts)
 
 	// Category
 	protected_V1.GET("/category", category.GetCategory)
+	protected_V1.GET("/category/:id", category.GetCategoryById)
+	protected_V1.POST("/category", category.CreateCategory)
+	protected_V1.POST("/category/:id", category.UpdateCategory)
+	protected_V1.DELETE("/category/:id", category.DeleteCategory)
 
 	// Statistik
 	protected_V1.POST("/statistik", statistik.GetStatistik)

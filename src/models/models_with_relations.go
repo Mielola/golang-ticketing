@@ -18,13 +18,13 @@ type User struct {
 	UpdatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
 
 	// Relations
-	EmployeeShifts []EmployeeShift `gorm:"foreignKey:UserEmail;references:Email"`
-	ShiftLogs      []ShiftLog      `gorm:"foreignKey:UserEmail;references:Email"`
-	UserLogs       []UserLog       `gorm:"foreignKey:UserEmail;references:Email"`
-	UserTickets    []UserTicket    `gorm:"foreignKey:UserEmail;references:Email"`
-	ExportLogs     []ExportLog     `gorm:"foreignKey:UserEmail;references:Email"`
-	Notes          []Note          `gorm:"foreignKey:UserEmail;references:Email"`
-	Tickets        []Ticket        `gorm:"foreignKey:UserEmail;references:Email"`
+	EmployeeShifts []EmployeeShift `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	ShiftLogs      []ShiftLog      `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	UserLogs       []UserLog       `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	UserTickets    []UserTicket    `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	ExportLogs     []ExportLog     `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	Notes          []Note          `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	Tickets        []Ticket        `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
 }
 
 func (User) TableName() string {
@@ -32,15 +32,15 @@ func (User) TableName() string {
 }
 
 type Shift struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement"`
+	ID        uint64    `gorm:"primaryKey;autoIncrement:false"`
 	ShiftName string    `gorm:"type:varchar(100);not null"`
 	StartTime time.Time `gorm:"type:TIME;not null"`
 	EndTime   time.Time `gorm:"type:TIME;not null"`
 	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
 
 	// Relations
-	EmployeeShifts []EmployeeShift `gorm:"foreignKey:ShiftID"`
-	ShiftLogs      []ShiftLog      `gorm:"foreignKey:ShiftID"`
+	EmployeeShifts []EmployeeShift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	ShiftLogs      []ShiftLog      `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
 
 // TableName specifies the table name for Shift
@@ -56,8 +56,8 @@ type EmployeeShift struct {
 	ShiftDate time.Time `gorm:"type:date;not null"`
 	CreatedAt time.Time `gorm:"type:TIMESTAMP"`
 
-	User  User  `gorm:"foreignKey:UserEmail;references:Email"`
-	Shift Shift `gorm:"foreignKey:ShiftID"`
+	User  User  `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	Shift Shift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
 
 // TableName specifies the table name for EmployeeShift
@@ -73,8 +73,8 @@ type ShiftLog struct {
 	ShiftDate time.Time `gorm:"type:date;not null"` // Perbaikan: gunakan type:date untuk tanggal
 	Reason    string    `gorm:"type:text"`
 
-	User  User  `gorm:"foreignKey:UserEmail;references:Email"`
-	Shift Shift `gorm:"foreignKey:ShiftID"`
+	User  User  `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	Shift Shift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
 
 // TableName specifies the table name for ShiftLog
@@ -102,7 +102,7 @@ type Product struct {
 	ID   uint64 `gorm:"primaryKey;autoIncrement"`
 	Name string `gorm:"type:varchar(100);not null;uniqueIndex"`
 
-	Categories []Category `gorm:"foreignKey:ProductsID"`
+	Categories []Category `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
 
 // TableName specifies the table name for Product
@@ -150,7 +150,7 @@ type UserLog struct {
 	ShiftName  string     `gorm:"type:varchar(100);default:null"`
 	OTP        string     `gorm:"type:varchar(100);default:null"`
 
-	User User `gorm:"foreignKey:UserEmail;references:Email"`
+	User User `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
 }
 
 // TableName specifies the table name for UserLog
@@ -200,7 +200,7 @@ type Note struct {
 	Content   string `gorm:"type:text;not null"`
 	UserEmail string `gorm:"type:varchar(255);not null;index"`
 
-	User User `gorm:"foreignKey:UserEmail;references:Email"`
+	User User `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
 }
 
 // TableName specifies the table name for Note

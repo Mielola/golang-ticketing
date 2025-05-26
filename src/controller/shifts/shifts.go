@@ -1,6 +1,7 @@
 package shifts
 
 import (
+	"errors"
 	"my-gin-project/src/database"
 	"my-gin-project/src/types"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // @ GET User Shifts
@@ -61,7 +63,7 @@ func GetUserShifts(c *gin.Context) {
 				if err != nil {
 					return shift.StartTime
 				}
-				return parsedTime.Format("15:04") // Hasil: "07:00"
+				return parsedTime.Format("15:04")
 			}(),
 		}
 	}
@@ -403,6 +405,186 @@ func ExportShifts(c *gin.Context) {
 		Success: true,
 		Message: "Successfully Get Shifts",
 		Data:    formattedShifts,
+	})
+}
+
+// @GET Shift Time
+func GetShiftTime(c *gin.Context) {
+	DB := database.GetDB()
+
+	var shiftTime []struct {
+		Id        string `json:"id"`
+		ShiftName string `json:"shift_name"`
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	}
+
+	if err := DB.Table("shifts").Scan(&shiftTime).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Time Shifts " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Success Get Time Shifts",
+		Data:    shiftTime,
+	})
+
+}
+
+// @GET Shift Time By Id
+func GetShiftTimeById(c *gin.Context) {
+	DB := database.GetDB()
+	id := c.Param("id")
+
+	var shift struct {
+		Id        string `json:"id"`
+		ShiftName string `json:"shift_name"`
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	}
+
+	// Ambil data shift berdasarkan ID
+	if err := DB.Table("shifts").Where("id = ?", id).Scan(&shift).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to get shift time by ID: " + err.Error(),
+		})
+		return
+	}
+
+	// Jika tidak ditemukan
+	if shift.Id == "" {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Shift not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Success get shift time by ID",
+		Data:    shift,
+	})
+}
+
+// @POST Shift Time
+func CreateShiftTime(c *gin.Context) {
+	DB := database.GetDB()
+
+	// Struct input dengan validasi basic
+	var input struct {
+		Id        string `json:"id" binding:"required"`
+		ShiftName string `json:"shift_name" binding:"required"`
+		StartTime string `json:"start_time" binding:"required"`
+		EndTime   string `json:"end_time" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid input: " + err.Error(),
+		})
+		return
+	}
+
+	var existing struct{ Id string }
+	if err := DB.Table("shifts").Where("id = ?", input.Id).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, types.ResponseFormat{
+			Success: false,
+			Message: "Shift with this ID already exists",
+		})
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Database error: " + err.Error(),
+		})
+		return
+	}
+
+	if err := DB.Table("shifts").Create(&input).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to create shift time: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, types.ResponseFormat{
+		Success: true,
+		Message: "Shift time created successfully",
+		Data:    input,
+	})
+}
+
+// @PUT Shift Time
+func UpdateShiftTime(c *gin.Context) {
+	DB := database.GetDB()
+
+	var input struct {
+		ShiftName string `json:"shift_name"`
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	}
+
+	if err := c.ShouldBindBodyWithJSON(&input); err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := DB.Table("shifts").Where("id = ?", c.Param("id")).Save(&input).Scan(&input).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Update Shifts Time " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Success Upate Shifts Time",
+		Data:    input,
+	})
+}
+
+// @DELETE Shift Time
+func DeleteShiftTime(c *gin.Context) {
+	DB := database.GetDB()
+	var shiftTime struct {
+		Id        string `json:"id"`
+		ShiftName string `json:"shift_name"`
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	}
+
+	if err := DB.Table("shifts").Where("id = ?", c.Param("id")).First(&shiftTime).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Shift Time",
+		})
+		return
+	}
+
+	if err := DB.Table("shifts").Delete(&shiftTime).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Delete Shift Time",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Success Delete Shift Time",
+		Data:    shiftTime,
 	})
 }
 

@@ -11,9 +11,9 @@ import (
 var DB *gorm.DB
 
 const (
-	DBUser     = "root"
-	DBPassword = ""
-	DBHost     = "mysql-ticketing"
+	DBUser     = "kris"
+	DBPassword = "kris1234"
+	DBHost     = "super_apps"
 	DBPort     = "3306"
 	DBName     = "commandcenter"
 )

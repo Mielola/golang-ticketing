@@ -57,7 +57,7 @@ type TicketsResponseAll struct {
 	ProductsName    string    `json:"products_name"`
 	HariMasuk       time.Time `json:"hari_masuk"`
 	WaktuMasuk      string    `json:"waktu_masuk"`
-	HariRespon      string    `json:"hari_respon,omitempty"`
+	HariRespon      time.Time `json:"hari_respon,omitempty"`
 	WaktuRespon     string    `json:"waktu_respon,omitempty"`
 	UserName        string    `json:"user_name,omitempty"`
 	UserEmail       string    `json:"user_email"`

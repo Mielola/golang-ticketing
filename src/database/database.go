@@ -11,9 +11,9 @@ import (
 var DB *gorm.DB
 
 const (
-	DBUser     = "kris"
-	DBPassword = "kris1234"
-	DBHost     = "super_apps"
+	DBUser     = "root"
+	DBPassword = ""
+	DBHost     = "localhost"
 	DBPort     = "3306"
 	DBName     = "commandcenter"
 )

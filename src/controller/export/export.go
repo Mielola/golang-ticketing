@@ -162,15 +162,7 @@ func ExportTickets(c *gin.Context) {
 			}
 		}
 
-		parsedHariRespon, err := time.Parse("2006-01-02T15:04:05-07:00", ticket.HariRespon)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-				Success: false,
-				Message: "Failed to parse HariRespon: " + err.Error(),
-				Data:    nil,
-			})
-			return
-		}
+		parsedHariRespon := ticket.HariRespon
 
 		// Get status timestamps using the provided SQL query
 		var statusTimestamps []StatusTimestamp
@@ -399,15 +391,7 @@ func ExportUsers(c *gin.Context) {
 			}
 		}
 
-		parsedHariRespon, err := time.Parse("2006-01-02T15:04:05-07:00", ticket.HariRespon)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-				Success: false,
-				Message: "Failed to parse HariRespon: " + err.Error(),
-				Data:    nil,
-			})
-			return
-		}
+		parsedHariRespon := ticket.HariRespon
 
 		var statusTimestamps []StatusTimestamp
 		rows, err := DB.Raw(`

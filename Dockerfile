@@ -23,7 +23,6 @@ WORKDIR /app
 COPY --from=builder /app/main .
 RUN chmod +x /app/main
 COPY --from=builder /app/dist/ticketing ./dist/ticketing
-COPY --from=builder /app/storage ./storage
 COPY --from=builder /app/nginx.conf /etc/nginx/nginx.conf
 
 # ✅ Copy script wait-for-it

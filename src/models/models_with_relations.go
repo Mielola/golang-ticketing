@@ -94,7 +94,7 @@ type Category struct {
 
 // TableName specifies the table name for Category
 func (Category) TableName() string {
-	return "Category"
+	return "category"
 }
 
 // Product represents products table

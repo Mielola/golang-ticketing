@@ -6,6 +6,7 @@ import (
 	"my-gin-project/src/controller/export"
 	"my-gin-project/src/controller/notes"
 	"my-gin-project/src/controller/products"
+	"my-gin-project/src/controller/role"
 	"my-gin-project/src/controller/shifts"
 	"my-gin-project/src/controller/statistik"
 	"my-gin-project/src/controller/ticket"
@@ -59,6 +60,9 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.POST("/export/users", export.ExportUsers)
 	protected_V1.POST("/export-logs", export.ExportLogs)
 
+	// Role
+	protected_V1.GET("/role", role.GetRole)
+
 	// Auth
 	protected_V1.POST("/logout", user.Logout)
 
@@ -66,10 +70,13 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/users", user.GetAllUsers)
 	protected_V1.GET("/email", user.GetEmail)
 	protected_V1.POST("/users", user.Registration)
+	protected_V1.POST("/users/:id", user.UpdateUsers)
 	protected_V1.GET("/users-logs", user.GetUsersLogs)
 	protected_V1.POST("/edit-profile", user.EditProfile)
 	protected_V1.POST("/edit-status-user", user.UpdateStatusUser)
 	protected_V1.GET("/get-profile", user.GetProfile)
+	protected_V1.DELETE("/users/:id", user.DeleteUser)
+	protected_V1.GET("/users/:id", user.GetUserByID)
 
 	// Notes
 	protected_V1.GET("/notes", notes.GetAllNotes)

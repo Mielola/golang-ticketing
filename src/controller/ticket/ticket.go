@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -8,9 +9,11 @@ import (
 	"time"
 
 	"my-gin-project/src/database"
+	"my-gin-project/src/models"
 	"my-gin-project/src/types"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func toSolvedTime(duration time.Duration) *string {
@@ -787,7 +790,7 @@ func AddTicket(c *gin.Context) {
 	}
 
 	// Initialize ticket
-	var ticket types.TicketsInput
+	var ticket models.Ticket
 
 	// Parse date fields
 	hariMasuk, err := time.Parse("2006-01-02", inputJSON.HariMasuk)
@@ -799,7 +802,8 @@ func AddTicket(c *gin.Context) {
 
 	// Assign remaining fields directly from the struct
 	ticket.WaktuMasuk = inputJSON.WaktuMasuk
-	ticket.HariRespon = inputJSON.HariRespon
+	hariRespon, err := time.Parse("2006-01-02", inputJSON.HariRespon)
+	ticket.HariRespon = &hariRespon
 	ticket.WaktuRespon = inputJSON.WaktuRespon
 	ticket.UserName = user.Name
 	ticket.UserEmail = user.Email
@@ -873,26 +877,30 @@ func generateTrackingID(productName string) string {
 // @GET
 func GetTicketByID(c *gin.Context) {
 	DB := database.GetDB()
-	var tickets []types.TicketsResponseAll
-	var historyTickets []types.TicketsLogsRaw
+	trackingID := c.Param("tracking_id")
 
-	if err := DB.Table("tickets").Select("*").Order("tickets.created_at  DESC").Where("tracking_id = ?", c.Param("tracking_id")).Find(&tickets).Error; err != nil {
+	// Ambil ticket beserta relasi user dan product
+	var ticket models.Ticket
+	if err := DB.Preload("User").Preload("Product").
+		Where("tracking_id = ?", trackingID).
+		First(&ticket).Error; err != nil {
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, types.ResponseFormat{
+				Success: false,
+				Message: "Ticket Not Found",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
-			Data:    nil,
 		})
 		return
 	}
 
-	if len(tickets) == 0 {
-		c.JSON(http.StatusNotFound, types.ResponseFormat{
-			Success: false,
-			Message: "Tickets Not Found",
-		})
-		return
-	}
-
+	// Ambil log riwayat tiket
+	var historyTickets []types.TicketsLogsRaw
 	if err := DB.Table("user_tickets").
 		Select(`
 			user_tickets.*, 
@@ -901,31 +909,29 @@ func GetTicketByID(c *gin.Context) {
 			users.avatar as user_avatar
 		`).
 		Joins("LEFT JOIN users ON user_tickets.user_email = users.email").
+		Where("user_tickets.tickets_id = ?", trackingID).
 		Order("user_tickets.update_at DESC").
-		Where("user_tickets.tickets_id = ?", c.Param("tracking_id")).
 		Find(&historyTickets).Error; err != nil {
-
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
-			Data:    nil,
 		})
 		return
 	}
 
+	// Siapkan base URL untuk avatar
 	scheme := "http"
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
 
-	// Ubah history tiket format
+	// Format logs
 	var formattedLogs []types.TicketsLogs
 	for _, log := range historyTickets {
 		if log.UserAvatar != "" {
 			log.UserAvatar = baseURL + log.UserAvatar
 		}
-
 		formattedLogs = append(formattedLogs, types.TicketsLogs{
 			ID:        log.ID,
 			TicketsId: log.TicketsId,
@@ -947,103 +953,79 @@ func GetTicketByID(c *gin.Context) {
 		})
 	}
 
-	emailArray := make([]string, len(tickets))
-	for i, ticket := range tickets {
-		emailArray[i] = ticket.UserEmail
+	// Ambil last replier dari user_tickets
+	var lastReply struct {
+		UserEmail string    `json:"user_email"`
+		NewStatus string    `json:"new_status"`
+		UpdatedAt time.Time `json:"update_at"`
 	}
+	DB.Table("user_tickets").
+		Select("user_email, new_status, update_at").
+		Where("tickets_id = ?", trackingID).
+		Order("update_at DESC").
+		Limit(1).
+		Scan(&lastReply)
 
-	var ticketCreator types.TicketsCreator
-
-	if err := DB.Table("users").
-		Select("email, name, avatar").
-		Where("email in (?)", emailArray).
-		Scan(&ticketCreator).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: err.Error(),
-		})
-		return
+	var lastReplier *struct {
+		Email  string `json:"email"`
+		Name   string `json:"name"`
+		Avatar string `json:"avatar"`
 	}
-
-	var formattedTickets map[string]interface{}
-	for _, ticket := range tickets {
-
-		if ticketCreator.Avatar != "" {
-			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
-		}
-
-		var lastReply struct {
-			UserEmail string    `json:"user_email"`
-			NewStatus string    `json:"new_status"`
-			UpdatedAt time.Time `json:"update_at"`
-		}
-
-		if err := DB.Table("user_tickets").
-			Select("user_email, new_status, update_at").
-			Where("tickets_id = ?", ticket.TrackingID).
-			Order("update_at DESC").
-			Limit(1).
-			Scan(&lastReply).Error; err != nil {
-			lastReply = struct {
-				UserEmail string    `json:"user_email"`
-				NewStatus string    `json:"new_status"`
-				UpdatedAt time.Time `json:"update_at"`
-			}{}
-		}
-
-		var lastReplier *struct {
+	if lastReply.UserEmail != "" {
+		var replierInfo struct {
 			Email  string `json:"email"`
 			Name   string `json:"name"`
 			Avatar string `json:"avatar"`
 		}
+		if err := DB.Table("users").
+			Select("email, name, avatar").
+			Where("email = ?", lastReply.UserEmail).
+			Scan(&replierInfo).Error; err == nil {
 
-		if lastReply.UserEmail != "" {
-			var replierInfo struct {
-				Email  string `json:"email"`
-				Name   string `json:"name"`
-				Avatar string `json:"avatar"`
+			if replierInfo.Avatar != "" {
+				replierInfo.Avatar = baseURL + replierInfo.Avatar
 			}
-
-			if err := DB.Table("users").
-				Select("email, name, avatar").
-				Where("email = ?", lastReply.UserEmail).
-				Scan(&replierInfo).Error; err == nil {
-
-				if replierInfo.Avatar != "" {
-					replierInfo.Avatar = baseURL + replierInfo.Avatar
-				}
-				lastReplier = &replierInfo
-			}
+			lastReplier = &replierInfo
 		}
+	}
 
-		formattedTickets = map[string]interface{}{
-			"id":             ticket.ID,
-			"tracking_id":    ticket.TrackingID,
-			"products_name":  ticket.ProductsName,
-			"hari_masuk":     ticket.HariMasuk.Format("2006-01-02"),
-			"waktu_masuk":    ticket.WaktuMasuk,
-			"solved_time":    ticket.SolvedTime,
-			"user":           ticketCreator,
-			"last_replier":   lastReplier,
-			"category":       ticket.CategoryName,
-			"priority":       ticket.Priority,
-			"status":         ticket.Status,
-			"subject":        ticket.Subject,
-			"no_whatsapp":    ticket.NoWhatsapp,
-			"detail_kendala": ticket.DetailKendala,
-			"pic":            ticket.PIC,
-			"created_date":   ticket.CreatedAt.Format("2006-01-02"),
-			"created_time":   ticket.CreatedAt.Format("15:04:05"),
-			"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
-			"history":        formattedLogs,
-			"respon_admin":   ticket.ResponDiberikan,
-		}
+	// Format avatar ticket creator
+	if ticket.User.Avatar != "" {
+		ticket.User.Avatar = baseURL + ticket.User.Avatar
+	}
+
+	// Final response
+	formattedTicket := map[string]interface{}{
+		"id":            ticket.ID,
+		"tracking_id":   ticket.TrackingID,
+		"products_name": ticket.ProductsName,
+		"hari_masuk":    ticket.HariMasuk.Format("2006-01-02"),
+		"waktu_masuk":   ticket.WaktuMasuk,
+		"solved_time":   ticket.SolvedTime,
+		"user": types.TicketsCreator{
+			Email:  ticket.User.Email,
+			Name:   ticket.User.Name,
+			Avatar: ticket.User.Avatar,
+		},
+		"last_replier":   lastReplier,
+		"category":       ticket.CategoryName,
+		"priority":       ticket.Priority,
+		"status":         ticket.Status,
+		"subject":        ticket.Subject,
+		"no_whatsapp":    ticket.NoWhatsapp,
+		"detail_kendala": ticket.DetailKendala,
+		"pic":            ticket.PIC,
+		"created_date":   ticket.CreatedAt.Format("2006-01-02"),
+		"created_time":   ticket.CreatedAt.Format("15:04:05"),
+		"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
+		"history":        formattedLogs,
+		"respon_admin":   ticket.ResponDiberikan,
 	}
 
 	c.JSON(http.StatusOK, types.ResponseFormat{
 		Success: true,
 		Message: "Tickets retrieved successfully",
-		Data:    formattedTickets,
+		Data:    formattedTicket,
 	})
 }
 

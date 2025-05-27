@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"my-gin-project/src/controller/email"
 	"my-gin-project/src/database"
+	"my-gin-project/src/models"
 	"my-gin-project/src/types"
 	"net/http"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 
 	"github.com/gin-gonic/gin"
 )
@@ -47,29 +49,166 @@ func generateOTP() string {
 // @GET Users
 func GetAllUsers(c *gin.Context) {
 	DB := database.GetDB()
-	var users []types.UserResponse
-	tableName := "users"
-
-	shiftDate := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
-
-	query := DB.Table(tableName).
-		Select("users.id, users.name, users.email, users.password, users.role, users.status, users.OTP, shifts.shift_name").
-		Joins("JOIN employee_shifts ON users.email = employee_shifts.user_email").
-		Joins("JOIN shifts ON employee_shifts.shift_id = shifts.id")
-
-	if shiftDate != "" {
-		query = query.Where("employee_shifts.shift_date = ?", shiftDate)
+	var users []struct {
+		ID       uint    `json:"id"`
+		Name     string  `json:"name"`
+		Email    string  `json:"email"`
+		Password string  `json:"password"`
+		Avatar   *string `json:"avatar"`
+		Role     string  `json:"role"`
 	}
 
-	if err := query.Group("users.id").Order("users.id").Find(&users).Error; err != nil {
+	if err := DB.Model(&models.User{}).
+		Select("ID", "Name", "Email", "Password", "Avatar", "role").
+		Scan(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to retrieve users: " + err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
+	for i := range users {
+		if users[i].Avatar != nil && *users[i].Avatar != "" {
+			avatarURL := baseURL + *users[i].Avatar
+			users[i].Avatar = &avatarURL
+		}
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Successfully retrieved users",
+		Data:    users,
+	})
+}
+
+// @UPDATE Users
+func UpdateUsers(c *gin.Context) {
+	DB := database.GetDB()
+	id := c.Param("id")
+
+	// Cari user berdasarkan id
+	var user models.User
+	if err := DB.First(&user, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, types.ResponseFormat{
+				Success: false,
+				Message: "User not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Bind JSON input ke struct
+	var input struct {
+		Name     string `json:"name" binding:"required"`
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required"`
+		Role     string `json:"role" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid input: " + err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	// Update field yang diizinkan
+	updates := map[string]interface{}{
+		"Name":     input.Name,
+		"Email":    input.Email,
+		"Password": input.Password,
+		"Role":     input.Role,
+	}
+
+	if err := DB.Model(&user).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "All users retrieved successfully",
-		"data":    users,
+		"status":  true,
+		"message": "User updated successfully",
+		"user":    user,
+	})
+}
+
+// @DELETE Users
+func DeleteUser(c *gin.Context) {
+	DB := database.GetDB()
+	id := c.Param("id")
+
+	// Cari dulu user yang akan dihapus
+	var user models.User
+	if err := DB.First(&user, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, types.ResponseFormat{
+				Success: false,
+				Message: "User not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to retrieve user: " + err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	// Hapus user
+	if err := DB.Delete(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to delete user: " + err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "User deleted successfully",
+	})
+}
+
+func GetUserByID(c *gin.Context) {
+	DB := database.GetDB()
+	id := c.Param("id")
+
+	var user models.User
+	if err := DB.First(&user, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, types.ResponseFormat{
+				Success: false,
+				Message: "User not found",
+				Data:    nil,
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to retrieve user: " + err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "User retrieved successfully",
+		Data:    user,
 	})
 }
 
@@ -129,17 +268,19 @@ func GetProfile(c *gin.Context) {
 		shifts.start_time,  
 		shifts.end_time, 
 		shifts.shift_name, 
-		CASE  
-			WHEN employee_shifts.shift_id IS NOT NULL AND DATE(employee_shifts.shift_date) = CURRENT_DATE() AND ( 
-				(shifts.start_time <= shifts.end_time AND TIME(NOW()) BETWEEN shifts.start_time AND shifts.end_time) 
-				OR 
-				(shifts.start_time > shifts.end_time AND (TIME(NOW()) >= shifts.start_time OR TIME(NOW()) <= shifts.end_time)) 
-			) 
-			THEN 'Active Shift' 
-			WHEN employee_shifts.shift_id IS NOT NULL
-			THEN 'Not On Shift'
-			ELSE NULL
-		END AS shift_status 
+	CASE  
+		WHEN employee_shifts.shift_id IS NOT NULL AND (
+			-- Shift normal: jam mulai < jam selesai (ex: 08:00 - 16:00)
+			(shifts.start_time <= shifts.end_time AND TIME(NOW()) BETWEEN shifts.start_time AND shifts.end_time)
+			OR
+			-- Shift malam: jam mulai > jam selesai (ex: 23:00 - 07:00)
+			(shifts.start_time > shifts.end_time AND (
+				TIME(NOW()) >= shifts.start_time OR TIME(NOW()) <= shifts.end_time
+			))
+		) THEN 'Active Shift'
+		WHEN employee_shifts.shift_id IS NOT NULL THEN 'Not On Shift'
+		ELSE NULL
+	END AS shift_status
 	FROM users
 	LEFT JOIN (
 		employee_shifts 
@@ -152,7 +293,15 @@ func GetProfile(c *gin.Context) {
 			AND shifts.start_time > shifts.end_time  
 			AND TIME(NOW()) < shifts.end_time)
 		)
-	WHERE users.email = ?
+		WHERE users.email = ?
+	AND (
+		DATE(employee_shifts.shift_date) = CURRENT_DATE()
+		OR (
+			DATE(employee_shifts.shift_date) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+			AND shifts.start_time > shifts.end_time
+			AND TIME(NOW()) <= shifts.end_time
+		)
+	)
 	LIMIT 1
 	`
 
@@ -467,29 +616,79 @@ func Logout(c *gin.Context) {
 // @POST Rehistrasi
 func Registration(c *gin.Context) {
 	DB := database.GetDB()
-	var users types.UserPost
 
-	if err := c.ShouldBindJSON(&users); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// Struct input untuk binding JSON
+	var input struct {
+		Name     string `json:"name" binding:"required"`
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required"`
+		Role     string `json:"role" binding:"required"`
+	}
+
+	// Bind input JSON ke struct
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
-	if users.Password != users.PasswordRetype {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Password and password retype must be the same"})
+	// Cek apakah email sudah ada
+	var existingUser models.User
+	if err := DB.Where("email = ?", input.Email).First(&existingUser).Error; err == nil {
+		c.JSON(http.StatusConflict, types.ResponseFormat{
+			Success: false,
+			Message: "Email already exists",
+		})
+		return
+	} else if err != gorm.ErrRecordNotFound {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Database error: " + err.Error(),
+		})
 		return
 	}
 
-	if users.Status == nil || *users.Status == "" {
-		defaultStatus := "offline"
-		users.Status = &defaultStatus // Assign pointer to default value
+	// Hash password dulu (gunakan bcrypt)
+	// hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	// if err != nil {
+	// 	c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+	// 		Success: false,
+	// 		Message: "Failed to hash password: " + err.Error(),
+	// 	})
+	// 	return
+	// }
+
+	// Buat object user baru
+	user := models.User{
+		Name:     input.Name,
+		Email:    input.Email,
+		Password: input.Password,
+		Role:     input.Role,
+		Status:   "offline",
 	}
 
-	if err := DB.Table("users").Create(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Simpan user ke database
+	if err := DB.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to create user: " + err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"status": true, "message": "Users added successfully", "users": users})
+	// Response sukses
+	c.JSON(http.StatusCreated, gin.H{
+		"status":  true,
+		"message": "User added successfully",
+		"user": map[string]interface{}{
+			"id":    user.ID,
+			"name":  user.Name,
+			"email": user.Email,
+			"role":  user.Role,
+		},
+	})
 }
 
 // @PUT User Profile

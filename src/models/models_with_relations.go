@@ -2,6 +2,17 @@ package models
 
 import "time"
 
+type Role struct {
+	ID   uint64 `gorm:"primaryKey;autoIncrement"`
+	Name string `gorm:"type:varchar(50);not null;uniqueIndex"`
+
+	Users []User `gorm:"foreignKey:Role;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Name"`
+}
+
+func (Role) TableName() string {
+	return "role"
+}
+
 // User represents users table
 type User struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement"`

@@ -153,15 +153,14 @@ type User struct {
 	Token          string    `json:"token"`
 }
 type UserPost struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Name           string    `json:"name"`
-	Email          string    `json:"email"`
-	Password       string    `json:"password"`
-	PasswordRetype string    `json:"password_retype" gorm:"-"`
-	Status         *string   `json:"status"`
-	OTP            *string   `json:"OTP"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Password  string    `json:"password"`
+	Status    *string   `json:"status"`
+	OTP       *string   `json:"OTP"`
+	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 type UserResponse struct {
 	ID        uint    `json:"id"`

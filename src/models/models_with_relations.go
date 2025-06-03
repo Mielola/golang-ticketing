@@ -96,11 +96,10 @@ func (ShiftLog) TableName() string {
 // Category represents category table
 type Category struct {
 	ID           uint64 `gorm:"primaryKey;autoIncrement"`
-	CategoryName string `gorm:"type:varchar(100);not null;uniqueIndex"`
+	CategoryName string `gorm:"type:varchar(100);not null;"`
 	ProductsID   uint64 `gorm:"not null;index"`
 
 	Product Product `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Ticket  Ticket  `gorm:"foreignKey:CategoryName;references:CategoryName;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 // TableName specifies the table name for Category
@@ -133,7 +132,7 @@ type Ticket struct {
 	UserName        string     `gorm:"type:varchar(255);not null"`
 	UserEmail       string     `gorm:"type:varchar(255);not null;index"`
 	NoWhatsapp      string     `gorm:"type:varchar(20);not null"`
-	CategoryName    string     `gorm:"type:varchar(100);not null"`
+	CategoryId      uint64     `gorm:"not null; index"`
 	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
 	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
 	Status          string     `gorm:"type:enum('New','On Progress','Resolved');default:'New';not null"`
@@ -144,8 +143,9 @@ type Ticket struct {
 	CreatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
 	UpdatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
 
-	User    User    `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Product Product `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (Ticket) TableName() string {

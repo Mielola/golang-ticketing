@@ -117,7 +117,7 @@ type TicketsLogs struct {
 
 type UpdateTicketInput struct {
 	ProductsName    string    `json:"products_name"`
-	CategoryName    string    `json:"category_name"`
+	CategoryId      string    `json:"category_id"`
 	NoWhatsapp      string    `json:"no_whatsapp"`
 	PIC             string    `json:"PIC"`
 	DetailKendala   string    `json:"detail_kendala"`
@@ -287,9 +287,10 @@ type DashboardResponse struct {
 }
 
 type DataContent struct {
-	Summary       TicketsResponse          `json:"summary"`
-	RecentTickets []map[string]interface{} `json:"recent_tickets"`
-	UserLogs      interface{}              `json:"user_logs"`
+	Summary              TicketsResponse          `json:"summary"`
+	RecentTickets        []map[string]interface{} `json:"recent_tickets"`
+	UserLogs             interface{}              `json:"user_logs"`
+	ChartTicketsProudcts interface{}              `json:"chartTicketsProducts"`
 }
 
 type UserLogResponse struct {

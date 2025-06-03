@@ -31,9 +31,37 @@ func GetDashboard(c *gin.Context) {
 	}
 
 	// --------------------------------------------
+	// @ GET Tickets Charts By Products
+	// --------------------------------------------
+	var ticketsCharts []struct {
+		Name          string `json:"name"`
+		TotalTickets  string `json:"total_tickets"`
+		TotalCategory string `json:"total_category"`
+	}
+
+	if err := DB.Table("products").
+		Select(`
+        products.name,
+        COUNT(DISTINCT tickets.id) as total_tickets,
+        COUNT(DISTINCT category.id) as total_category
+    `).
+		Joins("LEFT JOIN tickets ON products.name = tickets.products_name").
+		Joins("LEFT JOIN category ON products.id = category.products_id").
+		Group("products.name").
+		Scan(&ticketsCharts).Error; err != nil {
+
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Chart :" + err.Error(),
+		})
+		return
+	}
+
+	// --------------------------------------------
 	// @ GET Recent Tickets
 	// --------------------------------------------
 	type RecentTicket struct {
+		TrackingID    string     `json:"tracking_id"`
 		Category      string     `json:"category_name"`
 		CreatedAt     time.Time  `json:"created_at"`
 		DetailKendala string     `json:"detail_kendala"`
@@ -45,9 +73,9 @@ func GetDashboard(c *gin.Context) {
 
 	var recentTickets []RecentTicket
 	if err := DB.Table("tickets").
-		Select("category_name, created_at, detail_kendala, hari_masuk, waktu_masuk, subject, user_email").
+		Select("tracking_id, created_at, detail_kendala, hari_masuk, waktu_masuk, subject, user_email").
 		Order("created_at DESC").
-		Limit(10).
+		Limit(5).
 		Scan(&recentTickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to get recent tickets", "error": err.Error()})
 		return
@@ -55,7 +83,7 @@ func GetDashboard(c *gin.Context) {
 
 	// Format response
 	type FormattedRecentTicket struct {
-		Category      string  `json:"category_name"`
+		TrackingID    string  `json:"tracking_id"`
 		CreatedAt     string  `json:"created_at"`
 		DetailKendala string  `json:"detail_kendala"`
 		HariMasuk     *string `json:"hari_masuk,omitempty"`
@@ -74,7 +102,7 @@ func GetDashboard(c *gin.Context) {
 		}
 
 		formattedTickets = append(formattedTickets, FormattedRecentTicket{
-			Category:      ticket.Category,
+			TrackingID:    ticket.TrackingID,
 			CreatedAt:     ticket.CreatedAt.Format("2006-01-02 15:04:05"),
 			DetailKendala: ticket.DetailKendala,
 			HariMasuk:     formattedHariMasuk,
@@ -128,7 +156,7 @@ func GetDashboard(c *gin.Context) {
 	var recentTicketsMap []map[string]interface{}
 	for _, ticket := range formattedTickets {
 		ticketMap := map[string]interface{}{
-			"category":       ticket.Category,
+			"tracking_id":    ticket.TrackingID,
 			"created_at":     ticket.CreatedAt,
 			"detail_kendala": ticket.DetailKendala,
 			"hari_masuk":     ticket.HariMasuk,
@@ -143,9 +171,10 @@ func GetDashboard(c *gin.Context) {
 		Success: true,
 		Message: "Dashboard data retrieved successfully",
 		Data: types.DataContent{
-			Summary:       tickets,
-			RecentTickets: recentTicketsMap,
-			UserLogs:      formattedUserLogs,
+			Summary:              tickets,
+			RecentTickets:        recentTicketsMap,
+			UserLogs:             formattedUserLogs,
+			ChartTicketsProudcts: ticketsCharts,
 		},
 	}
 
@@ -159,7 +188,10 @@ func GetForm(c *gin.Context) {
 		Name string `json:"name"`
 	}
 
-	var categories []string
+	var categories []struct {
+		ID           uint32 `json:"id"`
+		CategoryName string `json:"category_name"`
+	}
 
 	if err := c.ShouldBindJSON(&Product); err != nil {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
@@ -180,7 +212,7 @@ func GetForm(c *gin.Context) {
 	}
 
 	if err := DB.Table("category").
-		Select("category_name").
+		Select("id, category_name").
 		Where("products_id = (SELECT id FROM products WHERE name = ?)", Product.Name).
 		Pluck("category_name", &categories).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{

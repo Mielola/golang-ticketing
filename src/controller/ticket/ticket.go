@@ -126,8 +126,9 @@ func GetAllTickets(c *gin.Context) {
 	DB := database.GetDB()
 	var tickets []types.TicketsResponseAll
 	if err := DB.Table("tickets").
-		Select("*").
-		Order("priority DESC, status").
+		Select("tickets.*, category.category_name").
+		Joins("LEFT JOIN category ON tickets.category_id = category.id").
+		Order("CASE WHEN tickets.status != 'Resolved' THEN 0 ELSE 1 END, tickets.priority DESC").
 		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -616,8 +617,6 @@ func GenerateReport(c *gin.Context) {
 		WaktuMasuk      string    `json:"waktu_masuk"`
 		CategoryName    string    `json:"category_name"`
 		ResponDiberikan string    `json:"respon_diberikan"`
-		Status          string    `json:"status"`
-		Priority        string    `json:"priority"`
 	}
 
 	var chartPriority struct {
@@ -648,8 +647,8 @@ func GenerateReport(c *gin.Context) {
 		return
 	}
 
-	if err := DB.Table("category").Select("tickets.category_name, COUNT(*) AS total_tickets").
-		Joins("LEFT JOIN tickets ON category.category_name = tickets.category_name").
+	if err := DB.Table("category").Select("category.category_name, COUNT(*) AS total_tickets").
+		Joins("LEFT JOIN tickets ON category.id = tickets.category_id").
 		Where("products_name = ?", input.ProductsName).Group("category_name").
 		Find(&chartCategory).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -664,6 +663,8 @@ func GenerateReport(c *gin.Context) {
 
 	if input.Status == "all" || input.Status == "All" {
 		if err := DB.Table("tickets").
+			Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan").
+			Joins("LEFT JOIN category ON tickets.category_id = category.id").
 			Where("tickets.created_at BETWEEN ? AND ? AND products_name = ?", startDateTime, endDateTime, input.ProductsName).
 			Find(&tickets).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -675,6 +676,8 @@ func GenerateReport(c *gin.Context) {
 		}
 	} else {
 		if err := DB.Table("tickets").
+			Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan").
+			Joins("LEFT JOIN category ON tickets.category_id = category.id").
 			Where("tickets.created_at BETWEEN ? AND ? AND status = ? AND products_name = ?", startDateTime, endDateTime, input.Status, input.ProductsName).
 			Find(&tickets).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -710,8 +713,6 @@ func GenerateReport(c *gin.Context) {
 			"hari_masuk":    ticket.HariMasuk.Format("2006-01-02"),
 			"waktu_masuk":   ticket.WaktuMasuk,
 			"category_name": ticket.CategoryName,
-			"status":        ticket.Status,
-			"priority":      ticket.Priority,
 		})
 	}
 
@@ -745,9 +746,9 @@ func AddTicket(c *gin.Context) {
 		HariRespon      string `json:"hari_respon" binding:"required"`
 		WaktuMasuk      string `json:"waktu_masuk" binding:"required"`
 		WaktuRespon     string `json:"waktu_respon" binding:"required"`
-		CategoryName    string `json:"category_name" binding:"required"`
+		CategoryId      uint64 `json:"category_id" binding:"required"`
 		Subject         string `json:"subject" binding:"required"`
-		PIC             string `json:"PIC" binding:"required"`
+		PIC             string `json:"PIC"`
 		DetailKendala   string `json:"detail_kendala" binding:"required"`
 		ResponDiberikan string `json:"respon_diberikan" binding:"required"`
 		NoWhatsapp      string `json:"no_whatsapp" binding:"required"`
@@ -807,7 +808,7 @@ func AddTicket(c *gin.Context) {
 	ticket.WaktuRespon = inputJSON.WaktuRespon
 	ticket.UserName = user.Name
 	ticket.UserEmail = user.Email
-	ticket.CategoryName = inputJSON.CategoryName
+	ticket.CategoryId = inputJSON.CategoryId
 	ticket.Priority = inputJSON.Priority
 	ticket.Subject = inputJSON.Subject
 	ticket.DetailKendala = inputJSON.DetailKendala
@@ -881,7 +882,7 @@ func GetTicketByID(c *gin.Context) {
 
 	// Ambil ticket beserta relasi user dan product
 	var ticket models.Ticket
-	if err := DB.Preload("User").Preload("Product").
+	if err := DB.Preload("User").Preload("Product").Preload("Category").
 		Where("tracking_id = ?", trackingID).
 		First(&ticket).Error; err != nil {
 
@@ -1008,7 +1009,8 @@ func GetTicketByID(c *gin.Context) {
 			Avatar: ticket.User.Avatar,
 		},
 		"last_replier":   lastReplier,
-		"category":       ticket.CategoryName,
+		"category_id":    ticket.CategoryId,
+		"category":       ticket.Category.CategoryName,
 		"priority":       ticket.Priority,
 		"status":         ticket.Status,
 		"subject":        ticket.Subject,
@@ -1067,7 +1069,27 @@ func UpdateStatus(c *gin.Context) {
 	}
 
 	// @GET Ticket from Database
-	var ticket types.TicketsResponseAll
+	var ticket struct {
+		ID              uint      `gorm:"primaryKey" json:"id"`
+		TrackingID      string    `json:"tracking_id"`
+		ProductsName    string    `json:"products_name"`
+		HariMasuk       time.Time `json:"hari_masuk"`
+		WaktuMasuk      string    `json:"waktu_masuk"`
+		HariRespon      time.Time `json:"hari_respon,omitempty"`
+		WaktuRespon     string    `json:"waktu_respon,omitempty"`
+		UserName        string    `json:"user_name,omitempty"`
+		UserEmail       string    `json:"user_email"`
+		NoWhatsapp      string    `json:"no_whatsapp"`
+		Priority        string    `json:"priority"`
+		Status          string    `json:"status"`
+		Subject         string    `json:"subject"`
+		DetailKendala   string    `json:"detail_kendala"`
+		PIC             string    `json:"PIC"`
+		ResponDiberikan string    `json:"respon_diberikan,omitempty"`
+		CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
+		UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+		SolvedTime      *string   `json:"solved_time,omitempty"`
+	}
 	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
 		c.JSON(http.StatusNotFound, types.ResponseFormat{
 			Success: false,
@@ -1132,7 +1154,18 @@ func UpdateStatus(c *gin.Context) {
 // @POST
 func UpdateTicket(c *gin.Context) {
 	DB := database.GetDB()
-	var input types.UpdateTicketInput
+	var input struct {
+		ProductsName    string    `json:"products_name"`
+		CategoryId      int       `json:"category_id"`
+		NoWhatsapp      string    `json:"no_whatsapp"`
+		PIC             string    `json:"PIC"`
+		DetailKendala   string    `json:"detail_kendala"`
+		ResponDiberikan string    `json:"respon_diberikan"`
+		Priority        string    `json:"priority"`
+		Status          string    `json:"status"`
+		HariMasuk       time.Time `json:"hari_masuk"`
+		WaktuMasuk      string    `json:"waktu_masuk"`
+	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1155,14 +1188,44 @@ func UpdateTicket(c *gin.Context) {
 
 	// Update ticket data
 	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).Updates(input).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Update Tickets : " + err.Error(),
+		})
 		return
 	}
 
 	// Get updated ticket
-	var ticket types.TicketsResponseAll
-	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": err.Error()})
+	var ticket struct {
+		TrackingID      string    `json:"tracking_id"`
+		ProductsName    string    `json:"products_name"`
+		HariMasuk       time.Time `json:"hari_masuk"`
+		WaktuMasuk      string    `json:"waktu_masuk"`
+		HariRespon      time.Time `json:"hari_respon,omitempty"`
+		WaktuRespon     string    `json:"waktu_respon,omitempty"`
+		UserName        string    `json:"user_name,omitempty"`
+		UserEmail       string    `json:"user_email"`
+		NoWhatsapp      string    `json:"no_whatsapp"`
+		CategoryId      uint64    `json:"category_id"`
+		Priority        string    `json:"priority"`
+		Status          string    `json:"status"`
+		Subject         string    `json:"subject"`
+		DetailKendala   string    `json:"detail_kendala"`
+		PIC             string    `json:"PIC"`
+		ResponDiberikan string    `json:"respon_diberikan,omitempty"`
+		CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
+		UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+		SolvedTime      *string   `json:"solved_time,omitempty"`
+	}
+	if err := DB.Table("tickets").
+		Select("*, category.category_name").
+		Joins("LEFT JOIN category ON tickets.category_id = category.id").
+		Where("tracking_id = ?", c.Param("tracking_id")).
+		First(&ticket).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Data Ticket : " + err.Error(),
+		})
 		return
 	}
 
@@ -1178,7 +1241,7 @@ func UpdateTicket(c *gin.Context) {
 	ticket.PIC = input.PIC
 
 	// Save update to ticket
-	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {
+	if err := DB.Table("tickets").Where("tracking_id = ?", ticket.TrackingID).Save(&ticket).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
@@ -1198,7 +1261,7 @@ func UpdateTicket(c *gin.Context) {
 	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
-			Message: err.Error(),
+			Message: "Error Save History : " + err.Error(),
 		})
 		return
 	}
@@ -1233,41 +1296,46 @@ func HandOverTicket(c *gin.Context) {
 	SELECT 
 		tickets.tracking_id, 
 		users.email, 
-		shifts.shift_name,
+		COALESCE(shifts.shift_name, shifts_for_admin.shift_name, '-') AS shift_name,
 		tickets.status,
 		tickets.created_at,
-		tickets.category_name,
+		category.category_name,
 		tickets.user_name,
 		tickets.subject,
 		tickets.PIC,
 		tickets.no_whatsapp,
 		tickets.priority,
 		users.avatar,
-		shifts.id AS shifts_id
+		COALESCE(shifts.id, shifts_for_admin.id, 0) AS shifts_id
 	FROM tickets
 	JOIN users ON tickets.user_email = users.email
-	JOIN employee_shifts ON users.email = employee_shifts.user_email
-	JOIN shifts ON employee_shifts.shift_id = shifts.id
-	WHERE tickets.status != 'Resolved'
-	  AND employee_shifts.shift_id = (
-		SELECT id 
+	LEFT JOIN category ON tickets.category_id = category.id
+	LEFT JOIN employee_shifts ON users.email = employee_shifts.user_email
+	LEFT JOIN shifts ON employee_shifts.shift_id = shifts.id
+	LEFT JOIN (
+		SELECT id, shift_name, start_time, end_time
 		FROM shifts
-		WHERE (
-		  (start_time < end_time AND NOW() BETWEEN start_time AND end_time)
-		  OR
-		  (start_time > end_time AND (NOW() >= start_time OR CURTIME() <= end_time))
+	) AS shifts_for_admin ON users.role = 'admin' 
+		AND employee_shifts.shift_id IS NULL
+		AND (
+			(shifts_for_admin.start_time < shifts_for_admin.end_time AND TIME(tickets.created_at) BETWEEN shifts_for_admin.start_time AND shifts_for_admin.end_time)
+			OR
+			(shifts_for_admin.start_time > shifts_for_admin.end_time AND (TIME(tickets.created_at) >= shifts_for_admin.start_time OR TIME(tickets.created_at) <= shifts_for_admin.end_time))
 		)
-		LIMIT 1
-	  )
-	GROUP BY tickets.tracking_id, shifts.shift_name, shifts.id
+	WHERE tickets.status != 'Resolved'
+	AND (
+		users.role = 'admin'
+		OR employee_shifts.shift_id IS NOT NULL
+	)
 	ORDER BY 
-	  CASE tickets.priority
-		WHEN 'High' THEN 1
-		WHEN 'Medium' THEN 2
-		WHEN 'Low' THEN 3
-		ELSE 4
-	  END,
-	  tickets.created_at ASC
+		CASE tickets.priority
+			WHEN 'High' THEN 1
+			WHEN 'Medium' THEN 2
+			WHEN 'Low' THEN 3
+			ELSE 4
+		END,
+		tickets.created_at ASC;
+
 	`
 
 	// Struct untuk raw query
@@ -1298,7 +1366,7 @@ func HandOverTicket(c *gin.Context) {
 	// Struct untuk response final dengan CreatedAt sudah di-format
 	type TicketResponse struct {
 		TrackingID   string `json:"tracking_id"`
-		CreatedAt    string `json:"created_at"` // sudah di-format
+		CreatedAt    string `json:"created_at"`
 		Status       string `json:"status"`
 		UserName     string `json:"user_name"`
 		Avatar       string `json:"avatar"`

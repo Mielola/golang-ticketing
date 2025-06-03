@@ -139,7 +139,7 @@ func GetAllProducts(c *gin.Context) {
 	if err := DB.Table("products").Select("products.id, products.name, COUNT(tickets.id) AS total_tickets").
 		Joins("LEFT JOIN tickets ON tickets.products_name = products.name").
 		Group("products.name").
-		Order("products.id DESC").
+		Order("total_tickets DESC").
 		Scan(&products).
 		Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{

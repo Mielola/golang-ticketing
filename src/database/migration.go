@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"log"
 	"my-gin-project/src/models"
 
@@ -20,6 +21,43 @@ func seedRoles(db *gorm.DB) {
 			log.Println("Role baru ditambahkan:", roleName)
 		}
 	}
+}
+
+func CleanInvalidCategoryIDs(db *gorm.DB) error {
+	var invalidTickets []struct {
+		ID         uint64
+		CategoryId uint64
+	}
+
+	err := db.Raw(`
+		SELECT t.id, t.category_id
+		FROM tickets t
+		LEFT JOIN category c ON t.category_id = c.id
+		WHERE c.id IS NULL
+	`).Scan(&invalidTickets).Error
+	if err != nil {
+		return fmt.Errorf("gagal scan ticket invalid: %w", err)
+	}
+
+	if len(invalidTickets) == 0 {
+		fmt.Println("✔ Tidak ada tickets dengan category_id yang invalid")
+		return nil
+	}
+
+	// (Opsional) Gunakan category_id default — misalnya ID = 1
+	defaultCategoryID := uint64(1)
+
+	// Update semua ticket invalid agar category_id-nya jadi default
+	for _, ticket := range invalidTickets {
+		if err := db.Model(&models.Ticket{}).
+			Where("id = ?", ticket.ID).
+			Update("category_id", defaultCategoryID).Error; err != nil {
+			return fmt.Errorf("gagal update ticket ID %d: %w", ticket.ID, err)
+		}
+		fmt.Printf("✔ Ticket ID %d diperbaiki (category_id -> %d)\n", ticket.ID, defaultCategoryID)
+	}
+
+	return nil
 }
 
 func MigrateDB() {

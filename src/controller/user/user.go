@@ -242,14 +242,17 @@ func GetProfile(c *gin.Context) {
 	DB := database.GetDB()
 	var response types.UserResponseWithoutToken
 	token := c.GetHeader("Authorization")
-	query := DB.Table("users").Where("users.token = ?", token).First(&response)
 
+	query := DB.Table("users").Where("users.token = ?", token).First(&response)
 	if query.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": query.Error.Error()})
 		return
 	}
 
-	// Cek shift saat ini
+	// Ambil user email
+	userEmail := response.Email
+
+	// Buat struct ShiftInfo manual
 	type ShiftInfo struct {
 		ShiftID     uint    `json:"shift_id"`
 		ShiftDate   string  `json:"shift_date"`
@@ -261,51 +264,33 @@ func GetProfile(c *gin.Context) {
 
 	var shiftInfo ShiftInfo
 
-	shiftQuery := `
-	SELECT  
-		employee_shifts.shift_id,  
-		employee_shifts.shift_date,  
-		shifts.start_time,  
-		shifts.end_time, 
-		shifts.shift_name, 
-	CASE  
-		WHEN employee_shifts.shift_id IS NOT NULL AND (
-			-- Shift normal: jam mulai < jam selesai (ex: 08:00 - 16:00)
-			(shifts.start_time <= shifts.end_time AND TIME(NOW()) BETWEEN shifts.start_time AND shifts.end_time)
-			OR
-			-- Shift malam: jam mulai > jam selesai (ex: 23:00 - 07:00)
-			(shifts.start_time > shifts.end_time AND (
-				TIME(NOW()) >= shifts.start_time OR TIME(NOW()) <= shifts.end_time
-			))
-		) THEN 'Active Shift'
-		WHEN employee_shifts.shift_id IS NOT NULL THEN 'Not On Shift'
-		ELSE NULL
-	END AS shift_status
-	FROM users
-	LEFT JOIN (
-		employee_shifts 
-		JOIN shifts ON employee_shifts.shift_id = shifts.id
-	) ON users.email = employee_shifts.user_email
-		AND (
-			DATE(employee_shifts.shift_date) = CURRENT_DATE() 
-			OR 
-			(DATE(employee_shifts.shift_date) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)  
-			AND shifts.start_time > shifts.end_time  
-			AND TIME(NOW()) < shifts.end_time)
-		)
-		WHERE users.email = ?
-	AND (
-		DATE(employee_shifts.shift_date) = CURRENT_DATE()
-		OR (
-			DATE(employee_shifts.shift_date) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
-			AND shifts.start_time > shifts.end_time
-			AND TIME(NOW()) <= shifts.end_time
-		)
-	)
-	LIMIT 1
-	`
+	// Sekarang waktu dan tanggal
+	now := time.Now()
+	currentTime := now.Format("15:04:05")
+	currentDate := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 
-	if err := DB.Raw(shiftQuery, response.Email).Scan(&shiftInfo).Error; err != nil {
+	// Subquery untuk join shifts
+	subQuery := DB.
+		Table("employee_shifts").
+		Select("employee_shifts.shift_id, employee_shifts.shift_date, shifts.start_time, shifts.end_time, shifts.shift_name").
+		Joins("join shifts ON employee_shifts.shift_id = shifts.id").
+		Where("employee_shifts.user_email = ?", userEmail).
+		Where(DB.Where("shifts.start_time < shifts.end_time AND DATE(employee_shifts.shift_date) = ?", currentDate).
+			Or("shifts.start_time > shifts.end_time AND DATE(employee_shifts.shift_date) = ? AND ? <= shifts.end_time", yesterday, currentTime)).
+		Limit(1)
+
+	// Execute query dan ambil shiftInfo
+	err := DB.Table("(?) as shift_data", subQuery).
+		Select("*, CASE WHEN shift_id IS NOT NULL AND ("+
+			"(start_time < end_time AND ? BETWEEN start_time AND end_time) OR "+
+			"(start_time > end_time AND (? >= start_time OR ? <= end_time))"+
+			") THEN 'Active Shift' "+
+			"WHEN shift_id IS NOT NULL THEN 'Not On Shift' ELSE NULL END as shift_status",
+			currentTime, currentTime, currentTime).
+		Scan(&shiftInfo).Error
+
+	if err != nil {
 		fmt.Printf("Error fetching shift info: %v\n", err)
 	}
 
@@ -317,13 +302,12 @@ func GetProfile(c *gin.Context) {
 		}
 	}
 
-	// Ambil baseURL dinamis dari request
+	// Avatar handler
 	scheme := "http"
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
-
 	if response.Avatar != nil && *response.Avatar != "" {
 		photoURL := baseURL + *response.Avatar
 		response.Avatar = &photoURL

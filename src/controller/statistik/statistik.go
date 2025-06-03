@@ -95,6 +95,7 @@ func GetStatistik(c *gin.Context) {
 		return
 	}
 
+	// Chart Tickets Berdasarkan Products
 	if err := DB.Table("products").
 		Select("products.name, COUNT(tickets.id) AS total_tickets").
 		Joins("LEFT JOIN tickets ON products.name = tickets.products_name").
@@ -124,7 +125,7 @@ func GetStatistik(c *gin.Context) {
 	// Chart Tickets Berdasarkan Category
 	if err := DB.Table("category").
 		Select("category.category_name, COUNT(tickets.id) AS total_tickets").
-		Joins("LEFT JOIN tickets ON tickets.category_name = category.category_name AND DATE(tickets.created_at) BETWEEN ? AND ? AND tickets.products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
+		Joins("LEFT JOIN tickets ON tickets.category_id = category.id AND DATE(tickets.created_at) BETWEEN ? AND ? AND tickets.products_name = ?", input.StartDate, input.EndDate, input.ProductsName).
 		Where("category.products_id = (SELECT id FROM products WHERE name = ?)", input.ProductsName).
 		Group("category.category_name").
 		Find(&chartCategory).Error; err != nil {

@@ -206,10 +206,12 @@ func (ExportLog) TableName() string {
 
 // Note represents note table
 type Note struct {
-	ID        uint64 `gorm:"primaryKey;autoIncrement"`
-	Title     string `gorm:"type:varchar(255);not null"`
-	Content   string `gorm:"type:text;not null"`
-	UserEmail string `gorm:"type:varchar(255);not null;index"`
+	ID        uint64     `gorm:"primaryKey;autoIncrement"`
+	Title     string     `gorm:"type:varchar(255);not null"`
+	Content   string     `gorm:"type:text;not null"`
+	UserEmail string     `gorm:"type:varchar(255);not null;index"`
+	CreatedAt *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
+	UpdatedAt *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
 
 	User User `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
 }

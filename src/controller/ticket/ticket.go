@@ -1301,6 +1301,7 @@ func HandOverTicket(c *gin.Context) {
 		tickets.created_at,
 		category.category_name,
 		tickets.user_name,
+		tickets.products_name,
 		tickets.subject,
 		tickets.PIC,
 		tickets.no_whatsapp,
@@ -1350,6 +1351,7 @@ func HandOverTicket(c *gin.Context) {
 		NoWhatsapp   string
 		Priority     string
 		CategoryName string
+		ProductsName string
 		Email        string
 		ShiftName    string
 		ShiftsId     string
@@ -1375,6 +1377,7 @@ func HandOverTicket(c *gin.Context) {
 		NoWhatsapp   string `json:"no_whatsapp"`
 		Priority     string `json:"priority"`
 		CategoryName string `json:"category_name"`
+		ProductsName string `json:"products_name"`
 		Email        string `json:"email"`
 		ShiftName    string `json:"shift_name"`
 		ShiftsId     string `json:"shifts_id"`
@@ -1406,6 +1409,7 @@ func HandOverTicket(c *gin.Context) {
 			NoWhatsapp:   t.NoWhatsapp,
 			Priority:     t.Priority,
 			CategoryName: t.CategoryName,
+			ProductsName: t.ProductsName,
 			Email:        t.Email,
 			ShiftName:    t.ShiftName,
 			ShiftsId:     t.ShiftsId,

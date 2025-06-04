@@ -82,6 +82,7 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/notes", notes.GetAllNotes)
 	protected_V1.GET("/notesByEmail", notes.FindByEmail)
 	protected_V1.POST("/notes", notes.CreateNote)
+	protected_V1.DELETE("/notes/:id", notes.DeleteNote)
 
 	// Shifts
 	protected_V1.POST("/shifts", shifts.AddShift)

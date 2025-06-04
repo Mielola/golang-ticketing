@@ -2,6 +2,7 @@ package notes
 
 import (
 	"net/http"
+	"time"
 
 	"my-gin-project/src/database"
 	"my-gin-project/src/types"
@@ -16,63 +17,46 @@ import (
 func GetAllNotes(c *gin.Context) {
 	DB := database.GetDB()
 
-	var notes []struct {
-		ID      uint   `json:"id"`
-		Title   string `json:"title"`
-		Content string `json:"content"`
-		Email   string `json:"email"`
-		Name    string `json:"name"`
+	var rawNotes []struct {
+		ID        uint
+		Title     string
+		Content   string
+		Email     string
+		Name      string
+		UpdatedAt time.Time
 	}
 
-	if err := DB.Table("note").
-		Select("note.id, note.title, note.content, users.email, users.name").
-		Joins("LEFT JOIN users ON note.user_email = users.email").
-		Find(&notes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := DB.Table("notes").
+		Select("notes.id, notes.title, notes.content, users.email, users.name, notes.created_at, notes.updated_at").
+		Joins("LEFT JOIN users ON notes.user_email = users.email").
+		Order("notes.updated_at DESC").
+		Find(&rawNotes).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed Get Data Notes : " + err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "All notes retrieved successfully", "data": notes})
-}
+	// Format hasilnya
+	var notes []map[string]interface{}
+	for _, note := range rawNotes {
+		notes = append(notes, map[string]interface{}{
+			"id":         note.ID,
+			"title":      note.Title,
+			"content":    note.Content,
+			"email":      note.Email,
+			"name":       note.Name,
+			"updated_at": note.UpdatedAt.Format("2006-01-02 15:04:05"),
+		})
+	}
 
-// func GetAllNotes(c *gin.Context) {
-// 	var notes []types.Note
-// 	var notesResponse []types.NoteResponse
-// 	if err := DB.Table("note").
-// 		Select("note.id, note.title, note.content, users.email, users.name").
-// 		Joins("JOIN users ON note.user_id = users.id").
-// 		Find(&notes).Error; err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-// 		return
-// 	}
-// 	// Map untuk mengelompokkan notes berdasarkan email
-// 	groupedNotes := make(map[string]types.NoteResponse)
-// 	// Iterasi melalui hasil query
-// 	for _, note := range notes {
-// 		key := note.Email // Gunakan email sebagai kunci unik
-// 		// Jika belum ada entri untuk email ini, buat entri baru
-// 		if _, exists := groupedNotes[key]; !exists {
-// 			groupedNotes[key] = types.NoteResponse{
-// 				Email: note.Email,
-// 				Name:  note.Name,
-// 				Notes: []types.NoteDetail{},
-// 			}
-// 		}
-// 		// Tambahkan catatan ke dalam array Notes
-// 		noteResponse := groupedNotes[key]
-// 		noteResponse.Notes = append(noteResponse.Notes, types.NoteDetail{
-// 			ID:      note.ID,
-// 			Title:   note.Title,
-// 			Content: note.Content,
-// 		})
-// 		groupedNotes[key] = noteResponse
-// 	}
-// 	// Konversi map menjadi slice untuk response
-// 	for _, response := range groupedNotes {
-// 		notesResponse = append(notesResponse, response)
-// 	}
-// 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "All notes retrieved successfully", "data": notesResponse})
-// }
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "All notes retrieved successfully",
+		"data":    notes,
+	})
+}
 
 func FindByEmail(c *gin.Context) {
 	DB := database.GetDB()
@@ -95,9 +79,9 @@ func FindByEmail(c *gin.Context) {
 	}
 
 	// Find notes for the user
-	if err := DB.Table("note").
-		Select("note.id, note.title, note.content").
-		Where("note.user_email = ?", email).
+	if err := DB.Table("notes").
+		Select("notes.id, notes.title, notes.content").
+		Where("notes.user_email = ?", email).
 		Find(&notes).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -123,28 +107,92 @@ func FindByEmail(c *gin.Context) {
 func CreateNote(c *gin.Context) {
 	DB := database.GetDB()
 	var input types.NoteBody
-
-	// switch {
-	// case input.Title == "":
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Title is required"})
-	// 	return
-	// case input.Content == "":
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Content is required"})
-	// 	return
-	// case input.Email == "":
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required"})
-	// 	return
-	// }
+	var user struct {
+		Email string
+	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := DB.Table("note").Create(&input).Error; err != nil {
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		return
+	}
+
+	if err := DB.Table("users").Select("email").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
+		return
+	}
+
+	type NewNotes struct {
+		Title     string `json:"title"`
+		Content   string `json:"content"`
+		UserEmail string `json:"user_email"`
+	}
+
+	formattedNotes := NewNotes{
+		Title:     input.Title,
+		Content:   input.Content,
+		UserEmail: user.Email,
+	}
+
+	if err := DB.Table("notes").Create(&formattedNotes).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"status": true, "message": "Notes added successfully", "users": input})
+}
+
+func DeleteNote(c *gin.Context) {
+	DB := database.GetDB()
+
+	id := c.Param("id")
+
+	if err := DB.Table("notes").Where("id = ?", id).Delete(nil).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  false,
+			"message": "Failed to delete note: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "Note deleted successfully",
+	})
+}
+
+func UpdateNote(c *gin.Context) {
+	DB := database.GetDB()
+	id := c.Param("id")
+
+	var input struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := DB.Table("notes").Where("id = ?", id).Updates(map[string]interface{}{
+		"title":   input.Title,
+		"content": input.Content,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  false,
+			"message": "Failed to update note: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "Note updated successfully",
+	})
 }

@@ -202,9 +202,8 @@ type UserBody struct {
 // --------------------------------------------
 
 type NoteBody struct {
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	UserEmail string `json:"user_email"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 type Note struct {

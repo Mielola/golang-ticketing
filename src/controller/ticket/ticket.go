@@ -128,7 +128,7 @@ func GetAllTickets(c *gin.Context) {
 	if err := DB.Table("tickets").
 		Select("tickets.*, category.category_name").
 		Joins("LEFT JOIN category ON tickets.category_id = category.id").
-		Order("CASE WHEN tickets.status != 'Resolved' THEN 0 ELSE 1 END, tickets.priority DESC").
+		Order("created_at ASC").
 		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -383,7 +383,12 @@ func GetTicketsByDateRange(c *gin.Context) {
 	}
 
 	tickets := make([]types.TicketsResponseAll, 0)
-	if err := DB.Table("tickets").Where("hari_masuk BETWEEN ? AND ?", startDate.String(), endDate.String()).Order("priority DESC").Find(&tickets).Error; err != nil {
+	if err := DB.Table("tickets").
+		Select("tickets.*, category.category_name").
+		Where("DATE(created_at) BETWEEN ? AND ?", startDate.String(), endDate.String()).
+		Order("created_at DESC").
+		Joins("LEFT JOIN category ON tickets.category_id = category.id").
+		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tickets: " + err.Error()})
 		return
 	}

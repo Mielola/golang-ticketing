@@ -112,18 +112,27 @@ func CreateNote(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
 	token := c.GetHeader("Authorization")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid Token",
+		})
 		return
 	}
 
 	if err := DB.Table("users").Select("email").Where("token = ?", token).First(&user).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
@@ -140,11 +149,18 @@ func CreateNote(c *gin.Context) {
 	}
 
 	if err := DB.Table("notes").Create(&formattedNotes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"status": true, "message": "Notes added successfully", "users": input})
+	c.JSON(http.StatusCreated, types.ResponseFormat{
+		Success: true,
+		Message: "Notes added successfully",
+		Data:    input,
+	})
 }
 
 func DeleteNote(c *gin.Context) {
@@ -176,7 +192,10 @@ func UpdateNote(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
 		return
 	}
 
@@ -184,15 +203,15 @@ func UpdateNote(c *gin.Context) {
 		"title":   input.Title,
 		"content": input.Content,
 	}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  false,
-			"message": "Failed to update note: " + err.Error(),
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":  true,
-		"message": "Note updated successfully",
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: false,
+		Message: "Note updated successfully",
 	})
 }

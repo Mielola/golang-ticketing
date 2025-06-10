@@ -128,7 +128,7 @@ func GetAllTickets(c *gin.Context) {
 	if err := DB.Table("tickets").
 		Select("tickets.*, category.category_name").
 		Joins("LEFT JOIN category ON tickets.category_id = category.id").
-		Order("created_at ASC").
+		Order("created_at DESC").
 		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -864,6 +864,106 @@ func AddTicket(c *gin.Context) {
 	})
 }
 
+// @POST
+func ImportTicketsArray(c *gin.Context) {
+	DB := database.GetDB()
+
+	// Struktur untuk terima array
+	var inputJSON []struct {
+		HariMasuk       string `json:"hari_masuk" binding:"required"`
+		HariRespon      string `json:"hari_respon" binding:"required"`
+		WaktuMasuk      string `json:"waktu_masuk" binding:"required"`
+		WaktuRespon     string `json:"waktu_respon" binding:"required"`
+		CategoryId      uint64 `json:"category_id" binding:"required"`
+		Subject         string `json:"subject" binding:"required"`
+		PIC             string `json:"PIC"`
+		DetailKendala   string `json:"detail_kendala" binding:"required"`
+		ResponDiberikan string `json:"respon_diberikan" binding:"required"`
+		NoWhatsapp      string `json:"no_whatsapp" binding:"required"`
+		Priority        string `json:"priority" binding:"required"`
+		ProductsName    string `json:"products_name" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&inputJSON); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Ambil token user
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Token is required"})
+		return
+	}
+
+	// Get user
+	var user struct {
+		Name  string
+		Email string
+	}
+	if err := DB.Table("users").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	var importedTickets []models.Ticket
+
+	for _, item := range inputJSON {
+		hariMasuk, _ := time.Parse("2006-01-02", item.HariMasuk)
+		hariRespon, _ := time.Parse("2006-01-02", item.HariRespon)
+
+		ticket := models.Ticket{
+			HariMasuk:       hariMasuk,
+			HariRespon:      &hariRespon,
+			WaktuMasuk:      item.WaktuMasuk,
+			WaktuRespon:     item.WaktuRespon,
+			CategoryId:      item.CategoryId,
+			Subject:         item.Subject,
+			PIC:             item.PIC,
+			DetailKendala:   item.DetailKendala,
+			ResponDiberikan: item.ResponDiberikan,
+			NoWhatsapp:      item.NoWhatsapp,
+			Priority:        item.Priority,
+			ProductsName:    item.ProductsName,
+			UserName:        user.Name,
+			UserEmail:       user.Email,
+			TrackingID:      generateTrackingID(item.ProductsName),
+		}
+
+		if err := DB.Table("tickets").Create(&ticket).Error; err != nil {
+			fmt.Printf("Error adding ticket: %v\n", err)
+			continue
+		}
+
+		history := struct {
+			UserEmail string
+			NewStatus string
+			TicketsID string
+			Priority  string
+			Details   string
+		}{
+			UserEmail: ticket.UserEmail,
+			NewStatus: "New",
+			TicketsID: ticket.TrackingID,
+			Priority:  ticket.Priority,
+			Details:   "Membuat Tiket Baru via Import Array",
+		}
+
+		DB.Table("user_tickets").Create(&history)
+
+		importedTickets = append(importedTickets, ticket)
+	}
+
+	c.JSON(http.StatusCreated, types.ResponseFormat{
+		Success: true,
+		Message: "Success Import Ticket",
+		Data:    importedTickets,
+	})
+}
+
 func generateTrackingID(productName string) string {
 	words := strings.Fields(productName)
 	var prefix string
@@ -1315,9 +1415,18 @@ func HandOverTicket(c *gin.Context) {
 		COALESCE(shifts.id, shifts_for_admin.id, 0) AS shifts_id
 	FROM tickets
 	JOIN users ON tickets.user_email = users.email
+
 	LEFT JOIN category ON tickets.category_id = category.id
-	LEFT JOIN employee_shifts ON users.email = employee_shifts.user_email
+
+	-- Join hanya ambil shift terakhir per user
+	LEFT JOIN (
+		SELECT user_email, MAX(shift_id) AS shift_id
+		FROM employee_shifts
+		GROUP BY user_email
+	) AS employee_shifts ON users.email = employee_shifts.user_email
+
 	LEFT JOIN shifts ON employee_shifts.shift_id = shifts.id
+
 	LEFT JOIN (
 		SELECT id, shift_name, start_time, end_time
 		FROM shifts
@@ -1340,8 +1449,7 @@ func HandOverTicket(c *gin.Context) {
 			WHEN 'Low' THEN 3
 			ELSE 4
 		END,
-		tickets.created_at ASC;
-
+		tickets.created_at DESC;
 	`
 
 	// Struct untuk raw query

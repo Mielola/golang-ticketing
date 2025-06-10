@@ -12,7 +12,7 @@ var DB *gorm.DB
 
 const (
 	DBUser     = "kris"
-	DBPassword = "kris12134"
+	DBPassword = "kris1234"
 	DBHost     = "super_apps"
 	DBPort     = "3306"
 	DBName     = "commandcenter"

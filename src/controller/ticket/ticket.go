@@ -864,24 +864,31 @@ func AddTicket(c *gin.Context) {
 	})
 }
 
+func getStringValue(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
 // @POST
 func ImportTicketsArray(c *gin.Context) {
 	DB := database.GetDB()
 
 	// Struktur untuk terima array
 	var inputJSON []struct {
-		HariMasuk       string `json:"hari_masuk" binding:"required"`
-		HariRespon      string `json:"hari_respon" binding:"required"`
-		WaktuMasuk      string `json:"waktu_masuk" binding:"required"`
-		WaktuRespon     string `json:"waktu_respon" binding:"required"`
-		CategoryId      uint64 `json:"category_id" binding:"required"`
-		Subject         string `json:"subject" binding:"required"`
-		PIC             string `json:"PIC"`
-		DetailKendala   string `json:"detail_kendala" binding:"required"`
-		ResponDiberikan string `json:"respon_diberikan" binding:"required"`
-		NoWhatsapp      string `json:"no_whatsapp" binding:"required"`
-		Priority        string `json:"priority" binding:"required"`
-		ProductsName    string `json:"products_name" binding:"required"`
+		HariMasuk       string  `json:"hari_masuk" binding:"required"`
+		HariRespon      string  `json:"hari_respon" binding:"required"`
+		WaktuMasuk      string  `json:"waktu_masuk" binding:"required"`
+		WaktuRespon     string  `json:"waktu_respon" binding:"required"`
+		CategoryId      uint64  `json:"category_id" binding:"required"`
+		Subject         string  `json:"subject" binding:"required"`
+		PIC             *string `json:"PIC"`
+		DetailKendala   string  `json:"detail_kendala" binding:"required"`
+		ResponDiberikan string  `json:"respon_diberikan" binding:"required"`
+		NoWhatsapp      *string `json:"no_whatsapp"`
+		Priority        string  `json:"priority" binding:"required"`
+		ProductsName    string  `json:"products_name" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&inputJSON); err != nil {
@@ -922,10 +929,10 @@ func ImportTicketsArray(c *gin.Context) {
 			WaktuRespon:     item.WaktuRespon,
 			CategoryId:      item.CategoryId,
 			Subject:         item.Subject,
-			PIC:             item.PIC,
+			PIC:             getStringValue(item.PIC),
 			DetailKendala:   item.DetailKendala,
 			ResponDiberikan: item.ResponDiberikan,
-			NoWhatsapp:      item.NoWhatsapp,
+			NoWhatsapp:      getStringValue(item.NoWhatsapp),
 			Priority:        item.Priority,
 			ProductsName:    item.ProductsName,
 			UserName:        user.Name,
@@ -949,7 +956,7 @@ func ImportTicketsArray(c *gin.Context) {
 			NewStatus: "New",
 			TicketsID: ticket.TrackingID,
 			Priority:  ticket.Priority,
-			Details:   "Membuat Tiket Baru via Import Array",
+			Details:   "Membuat Tiket Baru via Excel",
 		}
 
 		DB.Table("user_tickets").Create(&history)

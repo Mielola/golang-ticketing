@@ -131,7 +131,7 @@ type Ticket struct {
 	SolvedTime      string     `gorm:"type:varchar(100);default:null"`
 	UserName        string     `gorm:"type:varchar(255);not null"`
 	UserEmail       string     `gorm:"type:varchar(255);not null;index"`
-	NoWhatsapp      string     `gorm:"type:varchar(20);not null"`
+	NoWhatsapp      string     `gorm:"type:varchar(20);default:null"`
 	CategoryId      uint64     `gorm:"not null; index"`
 	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
 	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`

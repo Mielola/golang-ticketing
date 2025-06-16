@@ -54,7 +54,10 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/tickets-logs", ticket.GetTicketsLogs)
 	protected_V1.GET("/tickets-date", ticket.GetTicketsByDateRange)
 	protected_V1.DELETE("/tickets/:tracking_id", ticket.DeleteTicket)
+	protected_V1.POST("/tickets/restore/:tracking_id", ticket.RestoreTicket)
 	protected_V1.GET("/tickets/handover", ticket.HandOverTicket)
+	protected_V1.GET("/tickets/temp", ticket.GetDeletedTickets)
+	protected_V1.DELETE("/tickets/temp/:tracking_id", ticket.DeleteTempTickets)
 
 	// Export
 	protected_V1.POST("/export/tickets", export.ExportTickets)

@@ -42,6 +42,56 @@ func (User) TableName() string {
 	return "users"
 }
 
+type TempTickets struct {
+	ID              uint64     `gorm:"primaryKey;autoIncrement"`
+	TrackingID      string     `gorm:"type:varchar(100);uniqueIndex;"`
+	HariMasuk       time.Time  `gorm:"type:date;not null"`
+	WaktuMasuk      string     `gorm:"type:TIME;not null"`
+	HariRespon      *time.Time `gorm:"type:date;default:null"`
+	WaktuRespon     string     `gorm:"type:TIME;default:null"`
+	SolvedTime      string     `gorm:"type:varchar(100);default:null"`
+	UserEmail       string     `gorm:"type:varchar(255);not null;index"`
+	NoWhatsapp      string     `gorm:"type:varchar(20);default:null"`
+	CategoryId      uint64     `gorm:"not null; index"`
+	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
+	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
+	Status          string     `gorm:"type:enum('New','On Progress','Resolved');default:'New';not null"`
+	Subject         string     `gorm:"type:varchar(255);not null"`
+	DetailKendala   string     `gorm:"type:text;not null"`
+	PIC             string     `gorm:"column:PIC;type:varchar(255);default:null"`
+	ResponDiberikan string     `gorm:"type:text;default:null"`
+	DeletedBy       string     `gorm:"type:varchar(255); not null;"`
+	CreatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
+	UpdatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
+	DeletedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
+
+	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (TempTickets) TableName() string {
+	return "temp_tickets"
+}
+
+type TempUserTickets struct {
+	ID        uint64    `gorm:"primaryKey;autoIncrement"`
+	TicketsID string    `gorm:"type:varchar(100);not null;index"`
+	UserEmail string    `gorm:"type:varchar(255);not null;index"`
+	NewStatus string    `gorm:"type:varchar(50);not null"`
+	UpdateAt  time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
+	Priority  string    `gorm:"type:enum('Low','Medium','High','Critical');default:null"`
+	Details   string    `gorm:"type:varchar(150);default:null"`
+
+	User       User        `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	TempTicket TempTickets `gorm:"foreignKey:TicketsID;references:TrackingID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+// TableName specifies the table name for TempUserTickets
+func (TempUserTickets) TableName() string {
+	return "temp_user_tickets"
+}
+
 type Shift struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement:false"`
 	ShiftName string    `gorm:"type:varchar(100);not null"`

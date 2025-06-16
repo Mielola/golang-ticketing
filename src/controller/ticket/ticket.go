@@ -883,6 +883,7 @@ func ImportTicketsArray(c *gin.Context) {
 		WaktuRespon     string  `json:"waktu_respon" binding:"required"`
 		CategoryId      uint64  `json:"category_id" binding:"required"`
 		Subject         string  `json:"subject" binding:"required"`
+		Status          string  `json:"status" binding:"required"`
 		PIC             *string `json:"PIC"`
 		DetailKendala   string  `json:"detail_kendala" binding:"required"`
 		ResponDiberikan string  `json:"respon_diberikan" binding:"required"`
@@ -921,6 +922,11 @@ func ImportTicketsArray(c *gin.Context) {
 	for _, item := range inputJSON {
 		hariMasuk, _ := time.Parse("2006-01-02", item.HariMasuk)
 		hariRespon, _ := time.Parse("2006-01-02", item.HariRespon)
+		timeSolved := "On Progress"
+
+		if item.Status == "Resolved" {
+			timeSolved = "Generate By Excel"
+		}
 
 		ticket := models.Ticket{
 			HariMasuk:       hariMasuk,
@@ -932,6 +938,8 @@ func ImportTicketsArray(c *gin.Context) {
 			PIC:             getStringValue(item.PIC),
 			DetailKendala:   item.DetailKendala,
 			ResponDiberikan: item.ResponDiberikan,
+			Status:          item.Status,
+			SolvedTime:      timeSolved,
 			NoWhatsapp:      getStringValue(item.NoWhatsapp),
 			Priority:        item.Priority,
 			ProductsName:    item.ProductsName,
@@ -953,7 +961,7 @@ func ImportTicketsArray(c *gin.Context) {
 			Details   string
 		}{
 			UserEmail: ticket.UserEmail,
-			NewStatus: "New",
+			NewStatus: item.Status,
 			TicketsID: ticket.TrackingID,
 			Priority:  ticket.Priority,
 			Details:   "Membuat Tiket Baru via Excel",
@@ -1388,18 +1396,345 @@ func UpdateTicket(c *gin.Context) {
 // @DELETE
 func DeleteTicket(c *gin.Context) {
 	DB := database.GetDB()
-	var ticket types.Tickets
-	if err := DB.Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "Ticket not found"})
+
+	// Ambil token
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Token is required",
+		})
 		return
 	}
 
-	if err := DB.Delete(&ticket).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Ambil user
+	var user struct {
+		Name  string
+		Email string
+	}
+	if err := DB.Table("users").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid token or user not found",
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Ticket deleted successfully"})
+	// Ambil tiket
+	var ticket models.Ticket
+	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Ticket not found",
+		})
+		return
+	}
+
+	// Format waktu masuk dan waktu respon
+	waktuMasuk, err := combineDateTime(ticket.HariMasuk, ticket.WaktuMasuk)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid date or time format for waktu_masuk",
+		})
+		return
+	}
+
+	var waktuRespon *time.Time
+	if ticket.WaktuRespon != "" && ticket.HariRespon != nil {
+		combined, err := combineDateTime(*ticket.HariRespon, ticket.WaktuRespon)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, types.ResponseFormat{
+				Success: false,
+				Message: "Invalid date or time format for waktu_respon",
+			})
+			return
+		}
+		waktuRespon = &combined
+	}
+
+	// Simpan ke temp_tickets
+	tempTicket := models.TempTickets{
+		TrackingID:      ticket.TrackingID,
+		HariMasuk:       ticket.HariMasuk,
+		WaktuMasuk:      waktuMasuk.Format("15:04:05"),
+		HariRespon:      ticket.HariRespon,
+		WaktuRespon:     waktuRespon.Format("15:04:05"),
+		SolvedTime:      ticket.SolvedTime,
+		UserEmail:       ticket.UserEmail,
+		DeletedBy:       user.Email,
+		NoWhatsapp:      ticket.NoWhatsapp,
+		CategoryId:      ticket.CategoryId,
+		ProductsName:    ticket.ProductsName,
+		Priority:        ticket.Priority,
+		Status:          ticket.Status,
+		Subject:         ticket.Subject,
+		DetailKendala:   ticket.DetailKendala,
+		PIC:             ticket.PIC,
+		ResponDiberikan: ticket.ResponDiberikan,
+		CreatedAt:       ticket.CreatedAt,
+		UpdatedAt:       ticket.UpdatedAt,
+		DeletedAt:       timePtr(time.Now()),
+	}
+
+	if err := DB.Table("temp_tickets").Save(&tempTicket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to save to temporary tickets",
+		})
+		return
+	}
+
+	// Copy semua user_tickets ke temp_user_tickets
+	var userTickets []models.UserTicket
+	if err := DB.Table("user_tickets").Where("tickets_id = ?", ticket.TrackingID).Find(&userTickets).Error; err == nil {
+		for _, userTicket := range userTickets {
+			tempUserTicket := models.TempUserTickets{
+				TicketsID: userTicket.TicketsID,
+				UserEmail: userTicket.UserEmail,
+				NewStatus: userTicket.NewStatus,
+				UpdateAt:  userTicket.UpdateAt,
+				Priority:  userTicket.Priority,
+				Details:   userTicket.Details,
+			}
+			DB.Table("temp_user_tickets").Create(&tempUserTicket)
+		}
+	}
+
+	// Hapus user_tickets asli
+	if err := DB.Table("user_tickets").Where("tickets_id = ?", ticket.TrackingID).Delete(&models.UserTicket{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to delete user ticket history",
+		})
+		return
+	}
+
+	// Hapus tiket asli
+	if err := DB.Table("tickets").Where("tracking_id = ?", ticket.TrackingID).Delete(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Ticket deleted successfully and moved to temporary tickets",
+	})
+}
+
+// @POST
+func RestoreTicket(c *gin.Context) {
+	DB := database.GetDB()
+
+	// Ambil token
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Token is required",
+		})
+		return
+	}
+
+	// Validasi user
+	var user struct {
+		Name  string
+		Email string
+	}
+	if err := DB.Table("users").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid token or user not found",
+		})
+		return
+	}
+
+	// Ambil tiket dari temp_tickets
+	var tempTicket models.TempTickets
+	if err := DB.Table("temp_tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&tempTicket).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Temporary ticket not found",
+		})
+		return
+	}
+
+	// Parse waktu masuk
+	waktuMasuk, err := combineDateTime(tempTicket.HariMasuk, tempTicket.WaktuMasuk)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Invalid waktu_masuk format",
+		})
+		return
+	}
+
+	var waktuRespon string
+	if tempTicket.WaktuRespon != "" && tempTicket.HariRespon != nil {
+		waktuRespon = tempTicket.WaktuRespon
+	}
+
+	// Restore tiket
+	ticket := models.Ticket{
+		TrackingID:      tempTicket.TrackingID,
+		HariMasuk:       tempTicket.HariMasuk,
+		WaktuMasuk:      waktuMasuk.Format("15:04:05"),
+		HariRespon:      tempTicket.HariRespon,
+		WaktuRespon:     waktuRespon,
+		SolvedTime:      tempTicket.SolvedTime,
+		UserEmail:       tempTicket.UserEmail,
+		NoWhatsapp:      tempTicket.NoWhatsapp,
+		CategoryId:      tempTicket.CategoryId,
+		ProductsName:    tempTicket.ProductsName,
+		Priority:        tempTicket.Priority,
+		Status:          tempTicket.Status,
+		Subject:         tempTicket.Subject,
+		DetailKendala:   tempTicket.DetailKendala,
+		PIC:             tempTicket.PIC,
+		ResponDiberikan: tempTicket.ResponDiberikan,
+		CreatedAt:       tempTicket.CreatedAt,
+		UpdatedAt:       tempTicket.UpdatedAt,
+	}
+
+	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to restore ticket",
+		})
+		return
+	}
+
+	// Restore user_tickets dari temp_user_tickets
+	var tempUserTickets []models.TempUserTickets
+	if err := DB.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Find(&tempUserTickets).Error; err == nil {
+		for _, tempUserTicket := range tempUserTickets {
+			userTicket := models.UserTicket{
+				TicketsID: tempUserTicket.TicketsID,
+				UserEmail: tempUserTicket.UserEmail,
+				NewStatus: tempUserTicket.NewStatus,
+				UpdateAt:  tempUserTicket.UpdateAt,
+				Priority:  tempUserTicket.Priority,
+				Details:   tempUserTicket.Details,
+			}
+			DB.Table("user_tickets").Create(&userTicket)
+		}
+	}
+
+	// Hapus dari temp_user_tickets setelah restore
+	DB.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Delete(&models.TempUserTickets{})
+
+	// Hapus history dari temp_user_tickets
+	if err := DB.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Delete(&models.TempUserTickets{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to delete temporary user ticket history",
+		})
+		return
+	}
+
+	// Hapus dari temp_tickets
+	if err := DB.Table("temp_tickets").Where("tracking_id = ?", tempTicket.TrackingID).Delete(&models.TempTickets{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to delete temporary ticket",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Ticket restored successfully",
+	})
+}
+
+// @GET
+func GetDeletedTickets(c *gin.Context) {
+	DB := database.GetDB()
+
+	// Wajib: inisialisasi slice kosong
+	deletedTickets := make([]struct {
+		TrackingID   string    `json:"tracking_id"`
+		CategoryName string    `json:"category"`
+		ProductName  string    `json:"product"`
+		DeletedBy    string    `json:"deleted_by"`
+		DeletedAt    time.Time `json:"deleted_at"`
+	}, 0)
+
+	err := DB.Table("temp_tickets").
+		Select("temp_tickets.tracking_id, category.category_name as category_name, temp_tickets.products_name as product_name, temp_tickets.deleted_by, temp_tickets.deleted_at").
+		Joins("LEFT JOIN category ON temp_tickets.category_id = category.id").
+		Order("temp_tickets.deleted_at DESC").
+		Scan(&deletedTickets).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to retrieve deleted tickets",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Deleted tickets fetched successfully",
+		Data:    deletedTickets,
+	})
+}
+
+func DeleteTempTickets(c *gin.Context) {
+	DB := database.GetDB()
+
+	// Ambil tracking_id dari parameter
+	trackingID := c.Param("tracking_id")
+
+	// Cek apakah tiket ada di temp_tickets
+	var tempTicket models.TempTickets
+	if err := DB.Table("temp_tickets").Where("tracking_id = ?", trackingID).First(&tempTicket).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: "Temporary ticket not found",
+		})
+		return
+	}
+
+	// Hapus semua relasi user_tickets yang ada di temp_user_tickets
+	if err := DB.Table("temp_user_tickets").Where("tickets_id = ?", trackingID).Delete(&models.TempUserTickets{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to delete related temporary user tickets",
+		})
+		return
+	}
+
+	// Hapus tiket dari temp_tickets
+	if err := DB.Table("temp_tickets").Where("tracking_id = ?", trackingID).Delete(&models.TempTickets{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to delete temporary ticket",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Temporary ticket deleted successfully",
+	})
+}
+
+// Helper untuk pointer waktu
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
+
+// Helper gabungkan date + time string jadi DATETIME Go
+func combineDateTime(date time.Time, timeStr string) (time.Time, error) {
+	dateStr := date.Format("2006-01-02")
+	fullDateTimeStr := fmt.Sprintf("%s %s", dateStr, timeStr)
+	layout := "2006-01-02 15:04:05"
+	return time.Parse(layout, fullDateTimeStr)
 }
 
 func HandOverTicket(c *gin.Context) {

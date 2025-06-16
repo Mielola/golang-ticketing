@@ -69,6 +69,8 @@ func MigrateDB() {
 	err := db.AutoMigrate(
 		&models.Role{},
 		&models.User{},
+		&models.TempTickets{},
+		&models.TempUserTickets{},
 		&models.Shift{},
 		&models.EmployeeShift{},
 		&models.ShiftLog{},
@@ -98,6 +100,12 @@ func MigrateDB() {
 	}
 	if err := db.Exec("ALTER TABLE tickets MODIFY COLUMN waktu_respon TIME DEFAULT NULL").Error; err != nil {
 		log.Println("ALTER TABLE tickets waktu_respon mungkin sudah diubah atau error:", err)
+	}
+	if err := db.Exec("ALTER TABLE temp_tickets MODIFY COLUMN waktu_masuk TIME").Error; err != nil {
+		log.Println("ALTER TABLE temp_tickets waktu_masuk mungkin sudah diubah atau error:", err)
+	}
+	if err := db.Exec("ALTER TABLE temp_tickets MODIFY COLUMN waktu_respon TIME DEFAULT NULL").Error; err != nil {
+		log.Println("ALTER TABLE temp_tickets waktu_respon mungkin sudah diubah atau error:", err)
 	}
 
 	log.Println("Migrasi database selesai")

@@ -63,6 +63,8 @@ type TicketsResponseAll struct {
 	UserEmail       string    `json:"user_email"`
 	NoWhatsapp      string    `json:"no_whatsapp"`
 	CategoryName    string    `json:"category_name"`
+	PlacesName      *string   `json:"places_name"`
+	PlacesID        *uint64   `json:"places_id"`
 	Priority        string    `json:"priority"`
 	Status          string    `json:"status"`
 	Subject         string    `json:"subject"`

@@ -184,14 +184,21 @@ func GetDashboard(c *gin.Context) {
 // @ GET
 func GetForm(c *gin.Context) {
 	DB := database.GetDB()
+
 	var Product struct {
 		Name string `json:"name"`
 	}
 
-	var categories []struct {
+	// Inisialisasi jadi slice kosong (penting supaya gak null)
+	categories := []struct {
 		ID           uint32 `json:"id"`
 		CategoryName string `json:"category_name"`
-	}
+	}{}
+
+	places := []struct {
+		ID   uint32 `json:"id"`
+		Name string `json:"name"`
+	}{}
 
 	if err := c.ShouldBindJSON(&Product); err != nil {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
@@ -211,21 +218,50 @@ func GetForm(c *gin.Context) {
 		return
 	}
 
-	if err := DB.Table("category").
-		Select("id, category_name").
-		Where("products_id = (SELECT id FROM products WHERE name = ?)", Product.Name).
-		Pluck("category_name", &categories).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+	// Ambil ID produk
+	var productID uint
+	if err := DB.Table("products").Select("id").Where("name = ?", Product.Name).Scan(&productID).Error; err != nil || productID == 0 {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
 			Success: false,
-			Message: err.Error(),
+			Message: "Product not found",
 			Data:    nil,
 		})
 		return
 	}
 
+	// Ambil kategori berdasarkan product_id
+	if err := DB.Table("category").
+		Select("id, category_name").
+		Where("products_id = ?", productID).
+		Scan(&categories).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to get categories",
+			Data:    nil,
+		})
+		return
+	}
+
+	// Ambil places berdasarkan product_id
+	if err := DB.Table("places").
+		Select("id, name").
+		Where("products_id = ?", productID).
+		Scan(&places).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to get places",
+			Data:    nil,
+		})
+		return
+	}
+
+	// Return kategori dan tempat
 	c.JSON(http.StatusOK, types.ResponseFormat{
 		Success: true,
 		Message: "Data retrieved successfully",
-		Data:    categories,
+		Data: gin.H{
+			"category": categories,
+			"places":   places,
+		},
 	})
 }

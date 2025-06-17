@@ -39,6 +39,11 @@ func GetStatistik(c *gin.Context) {
 		TotalUserRole *string `json:"total_user_role"`
 	}
 
+	var chartPlace []struct {
+		Name         string `json:"name"`
+		TotalTickets int    `json:"total_tickets"`
+	}
+
 	var chartTicketPeriode []struct {
 		CreatedAt    *time.Time `json:"created_at"`
 		TotalTickets *string    `json:"total_tickets"`
@@ -165,6 +170,21 @@ func GetStatistik(c *gin.Context) {
 		return
 	}
 
+	// Query chart Places
+	if err := DB.Table("places").
+		Select("places.name, COUNT(tickets.id) AS total_tickets").
+		Joins("LEFT JOIN tickets ON places.id = tickets.places_id AND tickets.products_name = ?", input.ProductsName).
+		Group("places.name").
+		Having("COUNT(tickets.id) > 0").
+		Find(&chartPlace).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
 	// Chart Total Role
 	if err := DB.Table("users").
 		Select("users.role, COUNT(users.role) AS total_user_role").
@@ -216,6 +236,14 @@ func GetStatistik(c *gin.Context) {
 		})
 	}
 
+	placesItems := make([]map[string]interface{}, 0)
+	for _, places := range chartPlace {
+		placesItems = append(placesItems, map[string]interface{}{
+			"places_name":   places.Name,
+			"total_tickets": places.TotalTickets,
+		})
+	}
+
 	c.JSON(http.StatusOK, types.ResponseFormat{
 		Success: true,
 		Message: "Report generated successfully",
@@ -227,6 +255,7 @@ func GetStatistik(c *gin.Context) {
 			"CharUserRole":        charUserRole,
 			"ChartUserResolved":   chartUserResolved,
 			"ChartTicketProducts": chartTicketProducts,
+			"ChartPlaces":         placesItems,
 		},
 	})
 }

@@ -77,6 +77,7 @@ func MigrateDB() {
 		&models.Category{},
 		&models.Product{},
 		&models.Ticket{},
+		&models.Place{},
 		&models.UserLog{},
 		&models.UserTicket{},
 		&models.ExportLog{},

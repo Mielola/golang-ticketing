@@ -42,6 +42,118 @@ func (User) TableName() string {
 	return "users"
 }
 
+type Shift struct {
+	ID        uint64    `gorm:"primaryKey;autoIncrement:false"`
+	ShiftName string    `gorm:"type:varchar(100);not null"`
+	StartTime time.Time `gorm:"type:TIME;not null"`
+	EndTime   time.Time `gorm:"type:TIME;not null"`
+	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
+
+	// Relations
+	EmployeeShifts []EmployeeShift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	ShiftLogs      []ShiftLog      `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+}
+
+// TableName specifies the table name for Shift
+func (Shift) TableName() string {
+	return "shifts"
+}
+
+// EmployeeShift represents employee_shifts table
+type EmployeeShift struct {
+	ID        uint64    `gorm:"primaryKey;autoIncrement"`
+	UserEmail string    `gorm:"type:varchar(255);not null;index"`
+	ShiftID   uint64    `gorm:"not null;index"`
+	ShiftDate time.Time `gorm:"type:date;not null"`
+	CreatedAt time.Time `gorm:"type:TIMESTAMP"`
+
+	User  User  `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	Shift Shift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+}
+
+// TableName specifies the table name for EmployeeShift
+func (EmployeeShift) TableName() string {
+	return "employee_shifts"
+}
+
+// ShiftLog represents shift_logs table
+type ShiftLog struct {
+	ID        uint64    `gorm:"primaryKey;autoIncrement"`
+	UserEmail string    `gorm:"type:varchar(255);not null;index"`
+	ShiftID   uint64    `gorm:"not null;index"`
+	ShiftDate time.Time `gorm:"type:date;not null"`
+	Reason    string    `gorm:"type:text"`
+
+	User  User  `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
+	Shift Shift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+}
+
+// TableName specifies the table name for ShiftLog
+func (ShiftLog) TableName() string {
+	return "shift_logs"
+}
+
+// Category represents category table
+type Category struct {
+	ID           uint64 `gorm:"primaryKey;autoIncrement"`
+	CategoryName string `gorm:"type:varchar(100);not null;"`
+	ProductsID   uint64 `gorm:"not null;index"`
+
+	Product Product `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+// TableName specifies the table name for Category
+func (Category) TableName() string {
+	return "category"
+}
+
+// Product represents products table
+type Product struct {
+	ID   uint64 `gorm:"primaryKey;autoIncrement"`
+	Name string `gorm:"type:varchar(100);not null;uniqueIndex"`
+
+	Categories []Category `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+}
+
+// TableName specifies the table name for Product
+func (Product) TableName() string {
+	return "products"
+}
+
+// Ticket represents tickets table
+type Ticket struct {
+	ID              uint64     `gorm:"primaryKey;autoIncrement"`
+	TrackingID      string     `gorm:"type:varchar(100);uniqueIndex;not null"`
+	HariMasuk       time.Time  `gorm:"type:date;not null"`
+	WaktuMasuk      string     `gorm:"type:TIME;not null"`
+	HariRespon      *time.Time `gorm:"type:date;default:null"`
+	WaktuRespon     string     `gorm:"type:TIME;default:null"`
+	SolvedTime      string     `gorm:"type:varchar(100);default:null"`
+	UserName        string     `gorm:"type:varchar(255);not null"`
+	UserEmail       string     `gorm:"type:varchar(255);not null;index"`
+	NoWhatsapp      string     `gorm:"type:varchar(20);default:null"`
+	CategoryId      uint64     `gorm:"not null; index"`
+	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
+	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
+	PlacesID        *uint64    `gorm:"index"`
+	Status          string     `gorm:"type:enum('New','On Progress','Resolved');default:'New';not null"`
+	Subject         string     `gorm:"type:varchar(255);not null"`
+	DetailKendala   string     `gorm:"type:text;not null"`
+	PIC             string     `gorm:"column:PIC;type:varchar(255);default:null"`
+	ResponDiberikan string     `gorm:"type:text;default:null"`
+	CreatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
+	UpdatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
+
+	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Place    Place    `gorm:"foreignKey:PlacesID;refrences:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+}
+
+func (Ticket) TableName() string {
+	return "tickets"
+}
+
 type TempTickets struct {
 	ID              uint64     `gorm:"primaryKey;autoIncrement"`
 	TrackingID      string     `gorm:"type:varchar(100);uniqueIndex;"`
@@ -92,116 +204,6 @@ func (TempUserTickets) TableName() string {
 	return "temp_user_tickets"
 }
 
-type Shift struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement:false"`
-	ShiftName string    `gorm:"type:varchar(100);not null"`
-	StartTime time.Time `gorm:"type:TIME;not null"`
-	EndTime   time.Time `gorm:"type:TIME;not null"`
-	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
-
-	// Relations
-	EmployeeShifts []EmployeeShift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-	ShiftLogs      []ShiftLog      `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-}
-
-// TableName specifies the table name for Shift
-func (Shift) TableName() string {
-	return "shifts"
-}
-
-// EmployeeShift represents employee_shifts table
-type EmployeeShift struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement"`
-	UserEmail string    `gorm:"type:varchar(255);not null;index"`
-	ShiftID   uint64    `gorm:"not null;index"`
-	ShiftDate time.Time `gorm:"type:date;not null"`
-	CreatedAt time.Time `gorm:"type:TIMESTAMP"`
-
-	User  User  `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
-	Shift Shift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-}
-
-// TableName specifies the table name for EmployeeShift
-func (EmployeeShift) TableName() string {
-	return "employee_shifts"
-}
-
-// ShiftLog represents shift_logs table
-type ShiftLog struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement"`
-	UserEmail string    `gorm:"type:varchar(255);not null;index"`
-	ShiftID   uint64    `gorm:"not null;index"`
-	ShiftDate time.Time `gorm:"type:date;not null"` // Perbaikan: gunakan type:date untuk tanggal
-	Reason    string    `gorm:"type:text"`
-
-	User  User  `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
-	Shift Shift `gorm:"foreignKey:ShiftID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-}
-
-// TableName specifies the table name for ShiftLog
-func (ShiftLog) TableName() string {
-	return "shift_logs"
-}
-
-// Category represents category table
-type Category struct {
-	ID           uint64 `gorm:"primaryKey;autoIncrement"`
-	CategoryName string `gorm:"type:varchar(100);not null;"`
-	ProductsID   uint64 `gorm:"not null;index"`
-
-	Product Product `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-}
-
-// TableName specifies the table name for Category
-func (Category) TableName() string {
-	return "category"
-}
-
-// Product represents products table
-type Product struct {
-	ID   uint64 `gorm:"primaryKey;autoIncrement"`
-	Name string `gorm:"type:varchar(100);not null;uniqueIndex"`
-
-	Categories []Category `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-}
-
-// TableName specifies the table name for Product
-func (Product) TableName() string {
-	return "products"
-}
-
-// Ticket represents tickets table
-type Ticket struct {
-	ID              uint64     `gorm:"primaryKey;autoIncrement"`
-	TrackingID      string     `gorm:"type:varchar(100);uniqueIndex;not null"`
-	HariMasuk       time.Time  `gorm:"type:date;not null"`
-	WaktuMasuk      string     `gorm:"type:TIME;not null"`
-	HariRespon      *time.Time `gorm:"type:date;default:null"`
-	WaktuRespon     string     `gorm:"type:TIME;default:null"`
-	SolvedTime      string     `gorm:"type:varchar(100);default:null"`
-	UserName        string     `gorm:"type:varchar(255);not null"`
-	UserEmail       string     `gorm:"type:varchar(255);not null;index"`
-	NoWhatsapp      string     `gorm:"type:varchar(20);default:null"`
-	CategoryId      uint64     `gorm:"not null; index"`
-	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
-	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
-	Status          string     `gorm:"type:enum('New','On Progress','Resolved');default:'New';not null"`
-	Subject         string     `gorm:"type:varchar(255);not null"`
-	DetailKendala   string     `gorm:"type:text;not null"`
-	PIC             string     `gorm:"column:PIC;type:varchar(255);default:null"`
-	ResponDiberikan string     `gorm:"type:text;default:null"`
-	CreatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
-	UpdatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
-
-	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-}
-
-func (Ticket) TableName() string {
-	return "tickets"
-}
-
 // UserLog represents user_logs table
 type UserLog struct {
 	ID         uint64     `gorm:"primaryKey;autoIncrement"`
@@ -236,6 +238,18 @@ type UserTicket struct {
 // TableName specifies the table name for UserTicket
 func (UserTicket) TableName() string {
 	return "user_tickets"
+}
+
+type Place struct {
+	ID         uint64 `gorm:"primaryKey;autoIncrement"`
+	Name       string `gorm:"type:varchar(100); index"`
+	ProductsID uint64 `gorm:"index"`
+
+	Product Product `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+}
+
+func (Place) TableName() string {
+	return "places"
 }
 
 // ExportLog represents export_logs table

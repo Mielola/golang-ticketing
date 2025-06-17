@@ -5,6 +5,7 @@ import (
 	"my-gin-project/src/controller/dashboard"
 	"my-gin-project/src/controller/export"
 	"my-gin-project/src/controller/notes"
+	"my-gin-project/src/controller/places"
 	"my-gin-project/src/controller/products"
 	"my-gin-project/src/controller/role"
 	"my-gin-project/src/controller/shifts"
@@ -58,6 +59,12 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/tickets/handover", ticket.HandOverTicket)
 	protected_V1.GET("/tickets/temp", ticket.GetDeletedTickets)
 	protected_V1.DELETE("/tickets/temp/:tracking_id", ticket.DeleteTempTickets)
+
+	// Places
+	protected_V1.POST("/places", places.CreatePlace)
+	protected_V1.GET("/places", places.GetAllPlaces)
+	protected_V1.DELETE("/places/:id", places.DeletePlace)
+	protected_V1.POST("/places/:id", places.UpdatePlace)
 
 	// Export
 	protected_V1.POST("/export/tickets", export.ExportTickets)

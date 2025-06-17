@@ -126,8 +126,9 @@ func GetAllTickets(c *gin.Context) {
 	DB := database.GetDB()
 	var tickets []types.TicketsResponseAll
 	if err := DB.Table("tickets").
-		Select("tickets.*, category.category_name").
+		Select("tickets.*, category.category_name, places.name AS places_name").
 		Joins("LEFT JOIN category ON tickets.category_id = category.id").
+		Joins("LEFT JOIN places ON tickets.places_id = places.id").
 		Order("created_at DESC").
 		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
@@ -262,6 +263,8 @@ func GetAllTickets(c *gin.Context) {
 			"last_replier":   lastReplier,
 			"category":       ticket.CategoryName,
 			"priority":       ticket.Priority,
+			"places_id":      ticket.PlacesID,
+			"places_name":    ticket.PlacesName,
 			"status":         ticket.Status,
 			"subject":        ticket.Subject,
 			"no_whatsapp":    ticket.NoWhatsapp,
@@ -382,79 +385,122 @@ func GetTicketsByDateRange(c *gin.Context) {
 		return
 	}
 
-	tickets := make([]types.TicketsResponseAll, 0)
+	// Query tickets dengan JOIN langsung ke users untuk mendapatkan creator info
+	type TicketWithCreator struct {
+		types.TicketsResponseAll
+		CreatorEmail  string `gorm:"column:creator_email"`
+		CreatorName   string `gorm:"column:creator_name"`
+		CreatorAvatar string `gorm:"column:creator_avatar"`
+	}
+
+	tickets := make([]TicketWithCreator, 0)
 	if err := DB.Table("tickets").
-		Select("tickets.*, category.category_name").
-		Where("DATE(created_at) BETWEEN ? AND ?", startDate.String(), endDate.String()).
-		Order("created_at DESC").
+		Select(`tickets.*, 
+			category.category_name, 
+			places.name AS places_name,
+			users.email AS creator_email,
+			users.name AS creator_name,
+			users.avatar AS creator_avatar`).
+		Where("DATE(tickets.created_at) BETWEEN ? AND ?", startDate.String(), endDate.String()).
+		Order("tickets.created_at DESC").
 		Joins("LEFT JOIN category ON tickets.category_id = category.id").
+		Joins("LEFT JOIN places ON tickets.places_id = places.id").
+		Joins("LEFT JOIN users ON tickets.user_email = users.email").
 		Find(&tickets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tickets: " + err.Error()})
 		return
 	}
 
+	if len(tickets) == 0 {
+		c.JSON(http.StatusOK, types.ResponseFormat{
+			Success: true,
+			Message: startDateStr + " to " + endDateStr,
+			Data:    []map[string]interface{}{},
+		})
+		return
+	}
+
+	// Kumpulkan semua tracking IDs untuk query last replies
+	trackingIDs := make([]string, len(tickets))
+	for i, ticket := range tickets {
+		trackingIDs[i] = ticket.TrackingID
+	}
+
+	// Query semua last replies sekaligus
+	type LastReplyWithUser struct {
+		TicketsID     string    `gorm:"column:tickets_id"`
+		UserEmail     string    `gorm:"column:user_email"`
+		NewStatus     string    `gorm:"column:new_status"`
+		UpdatedAt     time.Time `gorm:"column:update_at"`
+		ReplierName   string    `gorm:"column:replier_name"`
+		ReplierAvatar string    `gorm:"column:replier_avatar"`
+	}
+
+	lastReplies := make([]LastReplyWithUser, 0)
+	if err := DB.Table("user_tickets").
+		Select(`user_tickets.tickets_id,
+			user_tickets.user_email,
+			user_tickets.new_status,
+			user_tickets.update_at,
+			users.name AS replier_name,
+			users.avatar AS replier_avatar`).
+		Where("user_tickets.tickets_id IN (?)", trackingIDs).
+		Joins("LEFT JOIN users ON user_tickets.user_email = users.email").
+		Where(`user_tickets.update_at IN (
+			SELECT MAX(ut2.update_at) 
+			FROM user_tickets ut2 
+			WHERE ut2.tickets_id = user_tickets.tickets_id
+		)`).
+		Find(&lastReplies).Error; err != nil {
+		// Jika error, lanjutkan tanpa last reply info
+		lastReplies = []LastReplyWithUser{}
+	}
+
+	// Buat map untuk akses cepat last replies berdasarkan tracking_id
+	lastReplyMap := make(map[string]LastReplyWithUser)
+	for _, reply := range lastReplies {
+		lastReplyMap[reply.TicketsID] = reply
+	}
+
+	// Format response
 	scheme := "http"
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
-	formattedTickets := make([]map[string]interface{}, 0)
+
+	formattedTickets := make([]map[string]interface{}, 0, len(tickets))
 	for _, ticket := range tickets {
-		var ticketCreator types.TicketsCreator
-
-		if err := DB.Table("users").
-			Select("email, name, avatar").
-			Where("email = ?", ticket.UserEmail).
-			Scan(&ticketCreator).Error; err != nil {
-			return
+		// Format creator info
+		ticketCreator := types.TicketsCreator{
+			Email:  ticket.CreatorEmail,
+			Name:   ticket.CreatorName,
+			Avatar: ticket.CreatorAvatar,
 		}
-
 		if ticketCreator.Avatar != "" {
 			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
 		}
 
-		var lastReply struct {
-			UserEmail string    `json:"user_email"`
-			NewStatus string    `json:"new_status"`
-			UpdatedAt time.Time `json:"update_at"`
-		}
-
-		if err := DB.Table("user_tickets").
-			Select("user_email, new_status, update_at").
-			Where("tickets_id = ?", ticket.TrackingID).
-			Order("update_at DESC").
-			Limit(1).
-			Scan(&lastReply).Error; err != nil {
-			lastReply = struct {
-				UserEmail string    `json:"user_email"`
-				NewStatus string    `json:"new_status"`
-				UpdatedAt time.Time `json:"update_at"`
-			}{}
-		}
-
-		// Get last replier's information
+		// Format last replier info
 		var lastReplier *struct {
 			Email  string `json:"email"`
 			Name   string `json:"name"`
 			Avatar string `json:"avatar"`
 		}
 
-		if lastReply.UserEmail != "" {
-			var replierInfo struct {
+		if lastReply, exists := lastReplyMap[ticket.TrackingID]; exists && lastReply.UserEmail != "" {
+			avatar := lastReply.ReplierAvatar
+			if avatar != "" {
+				avatar = baseURL + avatar
+			}
+			lastReplier = &struct {
 				Email  string `json:"email"`
 				Name   string `json:"name"`
 				Avatar string `json:"avatar"`
-			}
-
-			if err := DB.Table("users").
-				Select("email, name, avatar").
-				Where("email = ?", lastReply.UserEmail).
-				Scan(&replierInfo).Error; err == nil {
-
-				if replierInfo.Avatar != "" {
-					replierInfo.Avatar = baseURL + replierInfo.Avatar
-				}
-				lastReplier = &replierInfo
+			}{
+				Email:  lastReply.UserEmail,
+				Name:   lastReply.ReplierName,
+				Avatar: avatar,
 			}
 		}
 
@@ -469,6 +515,7 @@ func GetTicketsByDateRange(c *gin.Context) {
 			"last_replier":   lastReplier,
 			"category":       ticket.CategoryName,
 			"priority":       ticket.Priority,
+			"places_name":    ticket.PlacesName,
 			"status":         ticket.Status,
 			"subject":        ticket.Subject,
 			"no_whatsapp":    ticket.NoWhatsapp,
@@ -480,7 +527,6 @@ func GetTicketsByDateRange(c *gin.Context) {
 		})
 	}
 
-	// Kirim respons
 	c.JSON(http.StatusOK, types.ResponseFormat{
 		Success: true,
 		Message: startDateStr + " to " + endDateStr,
@@ -569,13 +615,16 @@ func GetTicketsByPriority(c *gin.Context) {
 // @GET
 func GenerateReport(c *gin.Context) {
 	DB := database.GetDB()
+
 	var input struct {
-		ProductsName string `json:"products_name" binding:"required"`
-		StartDate    string `json:"start_date" binding:"required"`
-		EndDate      string `json:"end_date" binding:"required"`
-		Status       string `json:"status" binding:"required"`
-		StartTime    string `json:"start_time" binding:"required"`
-		EndTime      string `json:"end_time" binding:"required"`
+		ProductsName string  `json:"products_name" binding:"required"`
+		PlacesID     *string `json:"places_id"`
+		CategoryID   string  `json:"category_id"`
+		StartDate    string  `json:"start_date" binding:"required"`
+		EndDate      string  `json:"end_date" binding:"required"`
+		Status       string  `json:"status" binding:"required"`
+		StartTime    string  `json:"start_time" binding:"required"`
+		EndTime      string  `json:"end_time" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -605,15 +654,6 @@ func GenerateReport(c *gin.Context) {
 		return
 	}
 
-	if input.StartDate == "" || input.EndDate == "" {
-		c.JSON(http.StatusBadRequest, types.ResponseFormat{
-			Success: false,
-			Message: "Start date, end date, status are required",
-			Data:    nil,
-		})
-		return
-	}
-
 	var tickets []struct {
 		TrackingID      string    `json:"tracking_id"`
 		CreatedAt       time.Time `json:"created_at"`
@@ -621,6 +661,7 @@ func GenerateReport(c *gin.Context) {
 		HariMasuk       time.Time `json:"hari_masuk"`
 		WaktuMasuk      string    `json:"waktu_masuk"`
 		CategoryName    string    `json:"category_name"`
+		PlacesName      *string   `json:"places_name"`
 		ResponDiberikan string    `json:"respon_diberikan"`
 	}
 
@@ -628,6 +669,11 @@ func GenerateReport(c *gin.Context) {
 		Low    int `json:"low"`
 		Medium int `json:"medium"`
 		High   int `json:"high"`
+	}
+
+	var chartPlace []struct {
+		Name         string `json:"name"`
+		TotalTickets int    `json:"total_tickets"`
 	}
 
 	type PriorityItem struct {
@@ -640,6 +686,7 @@ func GenerateReport(c *gin.Context) {
 		TotalTickets int    `json:"total_tickets"`
 	}
 
+	// Query chart priority
 	if err := DB.Table("tickets").
 		Select("COUNT(CASE WHEN priority = 'Low' THEN 1 END) AS low, COUNT(CASE WHEN priority = 'Medium' THEN 1 END) AS medium, COUNT(CASE WHEN priority = 'High' THEN 1 END) AS high").
 		Where("products_name = ?", input.ProductsName).
@@ -652,6 +699,22 @@ func GenerateReport(c *gin.Context) {
 		return
 	}
 
+	// Query chart Places
+	if err := DB.Table("places").
+		Select("places.name, COUNT(tickets.id) AS total_tickets").
+		Joins("LEFT JOIN tickets ON places.id = tickets.places_id AND tickets.products_name = ?", input.ProductsName).
+		Group("places.name").
+		Having("COUNT(tickets.id) > 0").
+		Find(&chartPlace).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	// Query chart category
 	if err := DB.Table("category").Select("category.category_name, COUNT(*) AS total_tickets").
 		Joins("LEFT JOIN tickets ON category.id = tickets.category_id").
 		Where("products_name = ?", input.ProductsName).Group("category_name").
@@ -663,35 +726,40 @@ func GenerateReport(c *gin.Context) {
 		})
 		return
 	}
+
 	var startDateTime = input.StartDate + " " + input.StartTime
 	var endDateTime = input.EndDate + " " + input.EndTime
 
-	if input.Status == "all" || input.Status == "All" {
-		if err := DB.Table("tickets").
-			Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan").
-			Joins("LEFT JOIN category ON tickets.category_id = category.id").
-			Where("tickets.created_at BETWEEN ? AND ? AND products_name = ?", startDateTime, endDateTime, input.ProductsName).
-			Find(&tickets).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-				Success: false,
-				Message: err.Error(),
-				Data:    nil,
-			})
-			return
-		}
-	} else {
-		if err := DB.Table("tickets").
-			Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan").
-			Joins("LEFT JOIN category ON tickets.category_id = category.id").
-			Where("tickets.created_at BETWEEN ? AND ? AND status = ? AND products_name = ?", startDateTime, endDateTime, input.Status, input.ProductsName).
-			Find(&tickets).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-				Success: false,
-				Message: err.Error(),
-				Data:    nil,
-			})
-			return
-		}
+	// Dynamic Query
+	filters := DB.Table("tickets").
+		Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan, places.name AS places_name").
+		Joins("LEFT JOIN category ON tickets.category_id = category.id").
+		Joins("LEFT JOIN places ON tickets.places_id = places.id").
+		Where("tickets.created_at BETWEEN ? AND ? AND products_name = ?", startDateTime, endDateTime, input.ProductsName)
+
+	// Jika status tidak "all"
+	if strings.ToLower(input.Status) != "all" {
+		filters = filters.Where("tickets.status = ?", input.Status)
+	}
+
+	// Jika places_id tidak "all" dan tidak kosong
+	if input.PlacesID != nil && strings.ToLower(*input.PlacesID) != "all" {
+		filters = filters.Where("tickets.places_id = ?", input.PlacesID)
+	}
+
+	// Jika category_id tidak "all" dan tidak kosong
+	if strings.ToLower(input.CategoryID) != "all" && input.CategoryID != "" {
+		filters = filters.Where("tickets.category_id = ?", input.CategoryID)
+	}
+
+	// Execute query
+	if err := filters.Find(&tickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
 	}
 
 	priorityItems := []PriorityItem{
@@ -708,6 +776,14 @@ func GenerateReport(c *gin.Context) {
 		})
 	}
 
+	placesItems := make([]map[string]interface{}, 0)
+	for _, places := range chartPlace {
+		placesItems = append(placesItems, map[string]interface{}{
+			"places_name":   places.Name,
+			"total_tickets": places.TotalTickets,
+		})
+	}
+
 	formattedTickets := make([]map[string]interface{}, 0)
 	for _, ticket := range tickets {
 		formattedTickets = append(formattedTickets, map[string]interface{}{
@@ -718,6 +794,7 @@ func GenerateReport(c *gin.Context) {
 			"hari_masuk":    ticket.HariMasuk.Format("2006-01-02"),
 			"waktu_masuk":   ticket.WaktuMasuk,
 			"category_name": ticket.CategoryName,
+			"places_name":   ticket.PlacesName,
 		})
 	}
 
@@ -735,11 +812,11 @@ func GenerateReport(c *gin.Context) {
 		Products: input.ProductsName,
 		Data:     formattedTickets,
 		Chart: gin.H{
+			"ChartPlaces":   placesItems,
 			"ChartPriority": priorityItems,
 			"ChartCategory": categoryItems,
 		},
 	})
-
 }
 
 // @POST
@@ -747,18 +824,19 @@ func AddTicket(c *gin.Context) {
 	DB := database.GetDB()
 	// Input structure with proper validation tags
 	var inputJSON struct {
-		HariMasuk       string `json:"hari_masuk" binding:"required"`
-		HariRespon      string `json:"hari_respon" binding:"required"`
-		WaktuMasuk      string `json:"waktu_masuk" binding:"required"`
-		WaktuRespon     string `json:"waktu_respon" binding:"required"`
-		CategoryId      uint64 `json:"category_id" binding:"required"`
-		Subject         string `json:"subject" binding:"required"`
-		PIC             string `json:"PIC"`
-		DetailKendala   string `json:"detail_kendala" binding:"required"`
-		ResponDiberikan string `json:"respon_diberikan" binding:"required"`
-		NoWhatsapp      string `json:"no_whatsapp" binding:"required"`
-		Priority        string `json:"priority" binding:"required"`
-		ProductsName    string `json:"products_name" binding:"required"`
+		HariMasuk       string  `json:"hari_masuk" binding:"required"`
+		HariRespon      string  `json:"hari_respon" binding:"required"`
+		WaktuMasuk      string  `json:"waktu_masuk" binding:"required"`
+		WaktuRespon     string  `json:"waktu_respon" binding:"required"`
+		CategoryId      uint64  `json:"category_id" binding:"required"`
+		PlacesID        *uint64 `json:"places_id"`
+		Subject         string  `json:"subject" binding:"required"`
+		PIC             string  `json:"PIC"`
+		DetailKendala   string  `json:"detail_kendala" binding:"required"`
+		ResponDiberikan string  `json:"respon_diberikan" binding:"required"`
+		NoWhatsapp      string  `json:"no_whatsapp" binding:"required"`
+		Priority        string  `json:"priority" binding:"required"`
+		ProductsName    string  `json:"products_name" binding:"required"`
 	}
 
 	// Bind JSON to struct
@@ -810,6 +888,7 @@ func AddTicket(c *gin.Context) {
 	ticket.WaktuMasuk = inputJSON.WaktuMasuk
 	hariRespon, err := time.Parse("2006-01-02", inputJSON.HariRespon)
 	ticket.HariRespon = &hariRespon
+	ticket.PlacesID = *&inputJSON.PlacesID
 	ticket.WaktuRespon = inputJSON.WaktuRespon
 	ticket.UserName = user.Name
 	ticket.UserEmail = user.Email
@@ -1129,6 +1208,7 @@ func GetTicketByID(c *gin.Context) {
 			Avatar: ticket.User.Avatar,
 		},
 		"last_replier":   lastReplier,
+		"place_id":       ticket.PlacesID,
 		"category_id":    ticket.CategoryId,
 		"category":       ticket.Category.CategoryName,
 		"priority":       ticket.Priority,
@@ -1279,6 +1359,7 @@ func UpdateTicket(c *gin.Context) {
 		CategoryId      int       `json:"category_id"`
 		NoWhatsapp      string    `json:"no_whatsapp"`
 		PIC             string    `json:"PIC"`
+		PlacesID        uint32    `json:"places_id"`
 		DetailKendala   string    `json:"detail_kendala"`
 		ResponDiberikan string    `json:"respon_diberikan"`
 		Priority        string    `json:"priority"`
@@ -1332,6 +1413,7 @@ func UpdateTicket(c *gin.Context) {
 		Subject         string    `json:"subject"`
 		DetailKendala   string    `json:"detail_kendala"`
 		PIC             string    `json:"PIC"`
+		PlacesID        uint32    `json:"places_id"`
 		ResponDiberikan string    `json:"respon_diberikan,omitempty"`
 		CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
 		UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`

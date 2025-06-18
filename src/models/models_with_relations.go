@@ -15,18 +15,18 @@ func (Role) TableName() string {
 
 // User represents users table
 type User struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement"`
-	Name      string    `gorm:"type:varchar(255);not null"`
-	Email     string    `gorm:"type:varchar(255);uniqueIndex;not null"`
-	Password  string    `gorm:"type:varchar(255);not null"`
-	Avatar    string    `gorm:"type:varchar(255);default:default.jpg"`
-	Role      string    `gorm:"type:varchar(50);default:'pegawai';not null"`
-	Status    string    `gorm:"type:varchar(50);default:'offline';not null"`
-	OTP       string    `gorm:"column:OTP;type:varchar(100);default:null"`
-	Token     string    `gorm:"type:varchar(255);default:null"`
-	OTPActive bool      `gorm:"column:OTP_Active;default:false"`
-	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
+	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name      string    `gorm:"type:varchar(255);not null" json:"name"`
+	Email     string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+	Password  string    `gorm:"type:varchar(255);not null" json:"password"`
+	Avatar    string    `gorm:"type:varchar(255);default:default.jpg" json:"avatar"`
+	Role      string    `gorm:"type:varchar(50);default:'pegawai';not null" json:"role"`
+	Status    string    `gorm:"type:varchar(50);default:'offline';not null" json:"status"`
+	OTP       string    `gorm:"column:OTP;type:varchar(100);default:null" json:"otp"`
+	Token     string    `gorm:"type:varchar(255);default:null" json:"token"`
+	OTPActive bool      `gorm:"column:OTP_Active;default:false" json:"otp_active"`
+	CreatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt time.Time `gorm:"type:TIMESTAMP;default:CURRENT_TIMESTAMP" json:"updated_at"`
 
 	// Relations
 	EmployeeShifts []EmployeeShift `gorm:"foreignKey:UserEmail;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;references:Email"`
@@ -147,7 +147,7 @@ type Ticket struct {
 	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Place    Place    `gorm:"foreignKey:PlacesID;refrences:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	Place    *Place   `gorm:"foreignKey:PlacesID;refrences:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
 func (Ticket) TableName() string {

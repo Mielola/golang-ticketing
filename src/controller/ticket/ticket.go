@@ -124,17 +124,16 @@ func CheckTicketsDeadline(c *gin.Context) {
 // @GET
 func GetAllTickets(c *gin.Context) {
 	DB := database.GetDB()
-	var tickets []types.TicketsResponseAll
-	if err := DB.Table("tickets").
-		Select("tickets.*, category.category_name, places.name AS places_name").
-		Joins("LEFT JOIN category ON tickets.category_id = category.id").
-		Joins("LEFT JOIN places ON tickets.places_id = places.id").
+	var tickets []models.Ticket
+	if err := DB.Preload("Category").
+		Preload("User").
+		Preload("Place").
 		Order("created_at DESC").
 		Find(&tickets).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: err.Error(),
-			Data:    nil,
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+			"data":    nil,
 		})
 		return
 	}
@@ -144,95 +143,66 @@ func GetAllTickets(c *gin.Context) {
 		scheme = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
-	emailSet := make(map[string]bool)
 
+	// Map user email ke User struct untuk akses avatar dll
+	userMap := make(map[string]models.User)
 	for _, ticket := range tickets {
-		emailSet[ticket.UserEmail] = true
+		userMap[ticket.UserEmail] = ticket.User
 	}
 
-	var emails []string
-	for email := range emailSet {
-		emails = append(emails, email)
-	}
-
-	var users []types.TicketsCreator
-	if err := DB.Table("users").
-		Select("email, name, avatar").
-		Where("email IN ?", emails).
-		Scan(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: "Failed to fetch users",
-			Data:    nil,
-		})
-		return
-	}
-
-	userMap := make(map[string]types.TicketsCreator)
-	for _, user := range users {
-		if user.Avatar != "" {
-			user.Avatar = baseURL + user.Avatar
-		}
-		userMap[user.Email] = user
-	}
-
-	// 1. Ambil semua tracking_id dari tickets
+	// Ambil semua tracking_id untuk query last reply
 	var trackingIDs []string
 	for _, t := range tickets {
 		trackingIDs = append(trackingIDs, t.TrackingID)
 	}
 
-	// 2. Ambil last reply per tiket (latest update_at)
+	// Ambil last reply per ticket dari user_tickets
 	var lastRepliesRaw []struct {
-		TicketsID string    `json:"tickets_id"`
-		UserEmail string    `json:"user_email"`
-		NewStatus string    `json:"new_status"`
-		UpdatedAt time.Time `json:"update_at"`
+		TicketsID string
+		UserEmail string
+		NewStatus string
+		UpdateAt  time.Time
 	}
 	DB.Raw(`
-	SELECT ut.*
-	FROM user_tickets ut
-	INNER JOIN (
-		SELECT tickets_id, MAX(update_at) AS max_update
-		FROM user_tickets
-		WHERE tickets_id IN ?
-		GROUP BY tickets_id
-	) latest ON ut.tickets_id = latest.tickets_id AND ut.update_at = latest.max_update`, trackingIDs).Scan(&lastRepliesRaw)
+        SELECT ut.*
+        FROM user_tickets ut
+        INNER JOIN (
+            SELECT tickets_id, MAX(update_at) AS max_update
+            FROM user_tickets
+            WHERE tickets_id IN ?
+            GROUP BY tickets_id
+        ) latest ON ut.tickets_id = latest.tickets_id AND ut.update_at = latest.max_update
+    `, trackingIDs).Scan(&lastRepliesRaw)
 
-	// 3. Buat map tickets_id -> reply
+	// Map last reply per ticket
 	lastReplyMap := make(map[string]struct {
 		UserEmail string
 		NewStatus string
-		UpdatedAt time.Time
+		UpdateAt  time.Time
 	})
 	lastReplyEmails := make(map[string]bool)
 	for _, r := range lastRepliesRaw {
 		lastReplyMap[r.TicketsID] = struct {
 			UserEmail string
 			NewStatus string
-			UpdatedAt time.Time
-		}{r.UserEmail, r.NewStatus, r.UpdatedAt}
+			UpdateAt  time.Time
+		}{r.UserEmail, r.NewStatus, r.UpdateAt}
 		if r.UserEmail != "" {
 			lastReplyEmails[r.UserEmail] = true
 		}
 	}
 
-	// 4. Ambil data user yang jadi last replier
-	var lastRepliers []types.TicketsCreator
+	// Ambil user last replier
+	var lastRepliers []models.User
 	if len(lastReplyEmails) > 0 {
 		var emails []string
 		for e := range lastReplyEmails {
 			emails = append(emails, e)
 		}
-
-		DB.Table("users").
-			Select("email, name, avatar").
-			Where("email IN ?", emails).
-			Scan(&lastRepliers)
+		DB.Where("email IN ?", emails).Find(&lastRepliers)
 	}
 
-	// 5. Buat map email -> user (last replier)
-	lastReplierMap := make(map[string]types.TicketsCreator)
+	lastReplierMap := make(map[string]models.User)
 	for _, user := range lastRepliers {
 		if user.Avatar != "" {
 			user.Avatar = baseURL + user.Avatar
@@ -240,12 +210,15 @@ func GetAllTickets(c *gin.Context) {
 		lastReplierMap[user.Email] = user
 	}
 
-	// 6. Susun hasil akhir
+	// Susun hasil akhir
 	var formattedTickets []map[string]interface{}
 	for _, ticket := range tickets {
 		ticketCreator := userMap[ticket.UserEmail]
+		if ticketCreator.Avatar != "" {
+			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
+		}
 
-		var lastReplier *types.TicketsCreator
+		var lastReplier *models.User
 		if lr, ok := lastReplyMap[ticket.TrackingID]; ok {
 			if user, ok := lastReplierMap[lr.UserEmail]; ok {
 				lastReplier = &user
@@ -261,10 +234,10 @@ func GetAllTickets(c *gin.Context) {
 			"solved_time":    ticket.SolvedTime,
 			"user":           ticketCreator,
 			"last_replier":   lastReplier,
-			"category":       ticket.CategoryName,
+			"category":       ticket.Category.CategoryName,
 			"priority":       ticket.Priority,
 			"places_id":      ticket.PlacesID,
-			"places_name":    ticket.PlacesName,
+			"places_name":    "Not Found",
 			"status":         ticket.Status,
 			"subject":        ticket.Subject,
 			"no_whatsapp":    ticket.NoWhatsapp,
@@ -274,31 +247,49 @@ func GetAllTickets(c *gin.Context) {
 			"created_time":   ticket.CreatedAt.Format("15:04:05"),
 			"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
 		})
+		if ticket.Place != nil {
+			formattedTickets[len(formattedTickets)-1]["places_name"] = ticket.Place.Name
+		}
 	}
 
-	c.JSON(http.StatusOK, types.ResponseFormat{
-		Success: true,
-		Message: "Tickets retrieved successfully",
-		Data:    formattedTickets,
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Tickets retrieved successfully",
+		"data":    formattedTickets,
 	})
 }
 
 // @GET
 func GetTicketsLogs(c *gin.Context) {
-	var ticketLogs []types.TicketsLogsRaw
+
+	type TicketsCreator struct {
+		Email  string `json:"email"`
+		Name   string `json:"name"`
+		Avatar string `json:"avatar"`
+	}
+
+	type TicketsLogs struct {
+		ID             uint64         `json:"id"`
+		TicketsId      string         `json:"tickets_id"`
+		NewStatus      string         `json:"new_status"`
+		Priority       string         `json:"priority"`
+		Details        string         `json:"details"`
+		UpdateAt       time.Time      `json:"update_at"`
+		UpdateAtString string         `json:"update_at_string"`
+		User           TicketsCreator `json:"user"`
+	}
+
+	type ResponseFormat struct {
+		Success bool        `json:"success"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
+	}
+
 	DB := database.GetDB()
 
-	if err := DB.Table("user_tickets").
-		Select(`
-			user_tickets.*, 
-			users.email as user_email, 
-			users.name as user_name, 
-			users.avatar as user_avatar
-		`).
-		Joins("LEFT JOIN users ON user_tickets.user_email = users.email").
-		Order("user_tickets.update_at DESC").
-		Find(&ticketLogs).Error; err != nil {
-
+	var userTickets []models.UserTicket
+	err := DB.Preload("User").Order("update_at DESC").Find(&userTickets).Error
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
@@ -307,42 +298,41 @@ func GetTicketsLogs(c *gin.Context) {
 		return
 	}
 
-	// Ubah ke format yang diinginkan
 	scheme := "http"
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
-	formattedLogs := make([]types.TicketsLogs, 0, len(ticketLogs))
-	for _, log := range ticketLogs {
 
-		if log.UserAvatar != "" {
-			log.UserAvatar = baseURL + log.UserAvatar
+	formattedLogs := make([]TicketsLogs, 0, len(userTickets))
+	for _, ut := range userTickets {
+		avatar := ut.User.Avatar
+		if avatar != "" && !strings.HasPrefix(avatar, "http") {
+			avatar = baseURL + avatar
 		}
 
-		formattedLogs = append(formattedLogs, types.TicketsLogs{
-			ID:        log.ID,
-			TicketsId: log.TicketsId,
-			NewStatus: log.NewStatus,
-			Priority:  log.Priority,
-			Details:   log.Details,
-			UpdateAt:  log.UpdateAt,
-			UpdateAtString: func() string {
-				if log.UpdateAt != nil {
-					return log.UpdateAt.Format("2006-01-02 15:04:05")
-				}
-				return ""
-			}(),
-			User: types.TicketsCreator{
-				Email:  log.UserEmail,
-				Name:   log.UserName,
-				Avatar: log.UserAvatar,
+		updateAtStr := ""
+		if !ut.UpdateAt.IsZero() {
+			updateAtStr = ut.UpdateAt.Format("2006-01-02 15:04:05")
+		}
+
+		formattedLogs = append(formattedLogs, TicketsLogs{
+			ID:             ut.ID,
+			TicketsId:      ut.TicketsID,
+			NewStatus:      ut.NewStatus,
+			Priority:       ut.Priority,
+			Details:        ut.Details,
+			UpdateAt:       ut.UpdateAt,
+			UpdateAtString: updateAtStr,
+			User: TicketsCreator{
+				Email:  ut.User.Email,
+				Name:   ut.User.Name,
+				Avatar: avatar,
 			},
 		})
 	}
 
-	// Kirim response
-	c.JSON(http.StatusOK, types.ResponseFormat{
+	c.JSON(http.StatusOK, ResponseFormat{
 		Success: true,
 		Message: "Tickets logs retrieved successfully",
 		Data:    formattedLogs,
@@ -822,7 +812,8 @@ func GenerateReport(c *gin.Context) {
 // @POST
 func AddTicket(c *gin.Context) {
 	DB := database.GetDB()
-	// Input structure with proper validation tags
+
+	// Struktur input dengan validasi
 	var inputJSON struct {
 		HariMasuk       string  `json:"hari_masuk" binding:"required"`
 		HariRespon      string  `json:"hari_respon" binding:"required"`
@@ -839,82 +830,76 @@ func AddTicket(c *gin.Context) {
 		ProductsName    string  `json:"products_name" binding:"required"`
 	}
 
-	// Bind JSON to struct
+	// Bind input JSON
 	if err := c.ShouldBindJSON(&inputJSON); err != nil {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
-			Data:    nil,
 		})
 		return
 	}
 
+	// Ambil token dari header
 	token := c.GetHeader("Authorization")
 	if token == "" {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
 			Success: false,
 			Message: "Token is required",
-			Data:    nil,
 		})
 		return
 	}
 
+	// Cari user berdasarkan token
 	var user struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-
-	if err := DB.Table("users").Where("users.token = ?", token).First(&user).Error; err != nil {
-		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+	if err := DB.Table("users").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, types.ResponseFormat{
 			Success: false,
-			Message: err.Error(),
-			Data:    nil,
+			Message: "User not found or invalid token",
 		})
 		return
 	}
 
-	// Initialize ticket
-	var ticket models.Ticket
-
-	// Parse date fields
+	// Parsing tanggal dengan validasi
 	hariMasuk, err := time.Parse("2006-01-02", inputJSON.HariMasuk)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid hari_masuk format. Expected YYYY-MM-DD"})
 		return
 	}
-	ticket.HariMasuk = hariMasuk
 
-	// Assign remaining fields directly from the struct
-	ticket.WaktuMasuk = inputJSON.WaktuMasuk
 	hariRespon, err := time.Parse("2006-01-02", inputJSON.HariRespon)
-	ticket.HariRespon = &hariRespon
-	ticket.PlacesID = *&inputJSON.PlacesID
-	ticket.WaktuRespon = inputJSON.WaktuRespon
-	ticket.UserName = user.Name
-	ticket.UserEmail = user.Email
-	ticket.CategoryId = inputJSON.CategoryId
-	ticket.Priority = inputJSON.Priority
-	ticket.Subject = inputJSON.Subject
-	ticket.DetailKendala = inputJSON.DetailKendala
-	ticket.PIC = inputJSON.PIC
-	ticket.ResponDiberikan = inputJSON.ResponDiberikan
-	ticket.NoWhatsapp = inputJSON.NoWhatsapp
-	ticket.ProductsName = inputJSON.ProductsName
-
-	// Generate tracking ID
-	ticket.TrackingID = generateTrackingID(inputJSON.ProductsName)
-
-	// Save ticket to database
-	if err := DB.Table("tickets").Create(&ticket).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: err.Error(),
-			Data:    nil,
-		})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid hari_respon format. Expected YYYY-MM-DD"})
 		return
 	}
 
-	// Save history
+	// Inisialisasi struct ticket
+	ticket := models.Ticket{
+		HariMasuk:       hariMasuk,
+		WaktuMasuk:      inputJSON.WaktuMasuk,
+		HariRespon:      &hariRespon,
+		WaktuRespon:     inputJSON.WaktuRespon,
+		UserName:        user.Name,
+		UserEmail:       user.Email,
+		CategoryId:      inputJSON.CategoryId,
+		Priority:        inputJSON.Priority,
+		Subject:         inputJSON.Subject,
+		DetailKendala:   inputJSON.DetailKendala,
+		PIC:             inputJSON.PIC,
+		ResponDiberikan: inputJSON.ResponDiberikan,
+		NoWhatsapp:      inputJSON.NoWhatsapp,
+		ProductsName:    inputJSON.ProductsName,
+		TrackingID:      generateTrackingID(inputJSON.ProductsName),
+	}
+
+	// Handle PlacesID yang bisa nil
+	if inputJSON.PlacesID != nil {
+		ticket.PlacesID = *&inputJSON.PlacesID
+	}
+
+	// Buat history
 	history := struct {
 		UserEmail string `json:"user_email"`
 		NewStatus string `json:"new_status"`
@@ -929,7 +914,19 @@ func AddTicket(c *gin.Context) {
 		Details:   "Membuat Tiket Baru",
 	}
 
-	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {
+	// Transaction simpan ticket dan history sekaligus
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Table("tickets").Create(&ticket).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Table("user_tickets").Create(&history).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: err.Error(),
@@ -937,9 +934,10 @@ func AddTicket(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Ticket added successfully",
-		"ticket":  ticket,
+	c.JSON(http.StatusCreated, types.ResponseFormat{
+		Success: true,
+		Message: "Ticket added successfully",
+		Data:    ticket,
 	})
 }
 
@@ -1478,64 +1476,49 @@ func UpdateTicket(c *gin.Context) {
 // @DELETE
 func DeleteTicket(c *gin.Context) {
 	DB := database.GetDB()
-
-	// Ambil token
 	token := c.GetHeader("Authorization")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, types.ResponseFormat{
-			Success: false,
-			Message: "Token is required",
-		})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{Success: false, Message: "Token is required"})
 		return
 	}
 
-	// Ambil user
 	var user struct {
 		Name  string
 		Email string
 	}
 	if err := DB.Table("users").Where("token = ?", token).First(&user).Error; err != nil {
-		c.JSON(http.StatusBadRequest, types.ResponseFormat{
-			Success: false,
-			Message: "Invalid token or user not found",
-		})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{Success: false, Message: "Invalid token or user not found"})
 		return
 	}
 
-	// Ambil tiket
 	var ticket models.Ticket
 	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
-		c.JSON(http.StatusNotFound, types.ResponseFormat{
-			Success: false,
-			Message: "Ticket not found",
-		})
+		c.JSON(http.StatusNotFound, types.ResponseFormat{Success: false, Message: "Ticket not found"})
 		return
 	}
 
-	// Format waktu masuk dan waktu respon
 	waktuMasuk, err := combineDateTime(ticket.HariMasuk, ticket.WaktuMasuk)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, types.ResponseFormat{
-			Success: false,
-			Message: "Invalid date or time format for waktu_masuk",
-		})
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{Success: false, Message: "Invalid waktu_masuk"})
 		return
 	}
-
 	var waktuRespon *time.Time
 	if ticket.WaktuRespon != "" && ticket.HariRespon != nil {
 		combined, err := combineDateTime(*ticket.HariRespon, ticket.WaktuRespon)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, types.ResponseFormat{
-				Success: false,
-				Message: "Invalid date or time format for waktu_respon",
-			})
+			c.JSON(http.StatusBadRequest, types.ResponseFormat{Success: false, Message: "Invalid waktu_respon"})
 			return
 		}
 		waktuRespon = &combined
 	}
 
-	// Simpan ke temp_tickets
+	tx := DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
 	tempTicket := models.TempTickets{
 		TrackingID:      ticket.TrackingID,
 		HariMasuk:       ticket.HariMasuk,
@@ -1558,60 +1541,58 @@ func DeleteTicket(c *gin.Context) {
 		UpdatedAt:       ticket.UpdatedAt,
 		DeletedAt:       timePtr(time.Now()),
 	}
-
-	if err := DB.Table("temp_tickets").Save(&tempTicket).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: "Failed to save to temporary tickets",
-		})
+	if err := tx.Table("temp_tickets").Save(&tempTicket).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{Success: false, Message: "Failed to save temporary ticket"})
 		return
 	}
 
-	// Copy semua user_tickets ke temp_user_tickets
 	var userTickets []models.UserTicket
-	if err := DB.Table("user_tickets").Where("tickets_id = ?", ticket.TrackingID).Find(&userTickets).Error; err == nil {
-		for _, userTicket := range userTickets {
-			tempUserTicket := models.TempUserTickets{
-				TicketsID: userTicket.TicketsID,
-				UserEmail: userTicket.UserEmail,
-				NewStatus: userTicket.NewStatus,
-				UpdateAt:  userTicket.UpdateAt,
-				Priority:  userTicket.Priority,
-				Details:   userTicket.Details,
+	if err := tx.Table("user_tickets").Where("tickets_id = ?", ticket.TrackingID).Find(&userTickets).Error; err == nil {
+		if len(userTickets) > 0 {
+			// batch insert
+			var tempUserTickets []models.TempUserTickets
+			for _, ut := range userTickets {
+				tempUserTickets = append(tempUserTickets, models.TempUserTickets{
+					TicketsID: ut.TicketsID,
+					UserEmail: ut.UserEmail,
+					NewStatus: ut.NewStatus,
+					UpdateAt:  ut.UpdateAt,
+					Priority:  ut.Priority,
+					Details:   ut.Details,
+				})
 			}
-			DB.Table("temp_user_tickets").Create(&tempUserTicket)
+			if err := tx.Table("temp_user_tickets").Create(&tempUserTickets).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, types.ResponseFormat{Success: false, Message: "Failed to save temporary user tickets"})
+				return
+			}
 		}
 	}
 
-	// Hapus user_tickets asli
-	if err := DB.Table("user_tickets").Where("tickets_id = ?", ticket.TrackingID).Delete(&models.UserTicket{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: "Failed to delete user ticket history",
-		})
+	if err := tx.Table("user_tickets").Where("tickets_id = ?", ticket.TrackingID).Delete(&models.UserTicket{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{Success: false, Message: "Failed to delete user tickets"})
 		return
 	}
 
-	// Hapus tiket asli
-	if err := DB.Table("tickets").Where("tracking_id = ?", ticket.TrackingID).Delete(&ticket).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
-			Success: false,
-			Message: err.Error(),
-		})
+	if err := tx.Table("tickets").Where("tracking_id = ?", ticket.TrackingID).Delete(&models.Ticket{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{Success: false, Message: "Failed to delete ticket"})
 		return
 	}
 
-	c.JSON(http.StatusOK, types.ResponseFormat{
-		Success: true,
-		Message: "Ticket deleted successfully and moved to temporary tickets",
-	})
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{Success: false, Message: "Failed to commit transaction"})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{Success: true, Message: "Ticket deleted and moved to temporary tickets"})
 }
 
 // @POST
 func RestoreTicket(c *gin.Context) {
 	DB := database.GetDB()
-
-	// Ambil token
 	token := c.GetHeader("Authorization")
 	if token == "" {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
@@ -1621,7 +1602,6 @@ func RestoreTicket(c *gin.Context) {
 		return
 	}
 
-	// Validasi user
 	var user struct {
 		Name  string
 		Email string
@@ -1634,7 +1614,6 @@ func RestoreTicket(c *gin.Context) {
 		return
 	}
 
-	// Ambil tiket dari temp_tickets
 	var tempTicket models.TempTickets
 	if err := DB.Table("temp_tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&tempTicket).Error; err != nil {
 		c.JSON(http.StatusNotFound, types.ResponseFormat{
@@ -1644,7 +1623,6 @@ func RestoreTicket(c *gin.Context) {
 		return
 	}
 
-	// Parse waktu masuk
 	waktuMasuk, err := combineDateTime(tempTicket.HariMasuk, tempTicket.WaktuMasuk)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, types.ResponseFormat{
@@ -1659,7 +1637,13 @@ func RestoreTicket(c *gin.Context) {
 		waktuRespon = tempTicket.WaktuRespon
 	}
 
-	// Restore tiket
+	tx := DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
 	ticket := models.Ticket{
 		TrackingID:      tempTicket.TrackingID,
 		HariMasuk:       tempTicket.HariMasuk,
@@ -1681,7 +1665,8 @@ func RestoreTicket(c *gin.Context) {
 		UpdatedAt:       tempTicket.UpdatedAt,
 	}
 
-	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {
+	if err := tx.Table("tickets").Save(&ticket).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: "Failed to restore ticket",
@@ -1689,39 +1674,54 @@ func RestoreTicket(c *gin.Context) {
 		return
 	}
 
-	// Restore user_tickets dari temp_user_tickets
 	var tempUserTickets []models.TempUserTickets
-	if err := DB.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Find(&tempUserTickets).Error; err == nil {
-		for _, tempUserTicket := range tempUserTickets {
-			userTicket := models.UserTicket{
-				TicketsID: tempUserTicket.TicketsID,
-				UserEmail: tempUserTicket.UserEmail,
-				NewStatus: tempUserTicket.NewStatus,
-				UpdateAt:  tempUserTicket.UpdateAt,
-				Priority:  tempUserTicket.Priority,
-				Details:   tempUserTicket.Details,
+	if err := tx.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Find(&tempUserTickets).Error; err == nil {
+		if len(tempUserTickets) > 0 {
+			var userTickets []models.UserTicket
+			for _, tut := range tempUserTickets {
+				userTickets = append(userTickets, models.UserTicket{
+					TicketsID: tut.TicketsID,
+					UserEmail: tut.UserEmail,
+					NewStatus: tut.NewStatus,
+					UpdateAt:  tut.UpdateAt,
+					Priority:  tut.Priority,
+					Details:   tut.Details,
+				})
 			}
-			DB.Table("user_tickets").Create(&userTicket)
+			if err := tx.Table("user_tickets").Create(&userTickets).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+					Success: false,
+					Message: "Failed to restore user tickets",
+				})
+				return
+			}
 		}
 	}
 
-	// Hapus dari temp_user_tickets setelah restore
-	DB.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Delete(&models.TempUserTickets{})
-
-	// Hapus history dari temp_user_tickets
-	if err := DB.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Delete(&models.TempUserTickets{}).Error; err != nil {
+	// Hapus data sementara user tickets & tiket dalam 1 delete per tabel
+	if err := tx.Table("temp_user_tickets").Where("tickets_id = ?", tempTicket.TrackingID).Delete(&models.TempUserTickets{}).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
-			Message: "Failed to delete temporary user ticket history",
+			Message: "Failed to delete temporary user tickets",
 		})
 		return
 	}
 
-	// Hapus dari temp_tickets
-	if err := DB.Table("temp_tickets").Where("tracking_id = ?", tempTicket.TrackingID).Delete(&models.TempTickets{}).Error; err != nil {
+	if err := tx.Table("temp_tickets").Where("tracking_id = ?", tempTicket.TrackingID).Delete(&models.TempTickets{}).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
 			Message: "Failed to delete temporary ticket",
+		})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to commit transaction",
 		})
 		return
 	}

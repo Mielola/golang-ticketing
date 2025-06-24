@@ -23,7 +23,7 @@ func SetupRoutes(r *gin.Engine) {
 
 	testMagang := v1.Group("/magang")
 	testMagang.GET("/users", magang.GetAllUsers)
-	testMagang.POST("/users", magang.CreateUsers)
+	testMagang.POST("/create-users", magang.CreateUsers)
 	testMagang.DELETE("/users/:id", magang.DeleteUsers)
 
 	// --------------------------------------------

@@ -4,6 +4,7 @@ import (
 	"my-gin-project/src/controller/category"
 	"my-gin-project/src/controller/dashboard"
 	"my-gin-project/src/controller/export"
+	"my-gin-project/src/controller/magang"
 	"my-gin-project/src/controller/notes"
 	"my-gin-project/src/controller/places"
 	"my-gin-project/src/controller/products"
@@ -19,6 +20,11 @@ import (
 
 func SetupRoutes(r *gin.Engine) {
 	v1 := r.Group("/api/V1")
+
+	testMagang := v1.Group("/magang")
+	testMagang.GET("/users", magang.GetAllUsers)
+	testMagang.POST("/users", magang.CreateUsers)
+	testMagang.DELETE("/users/:id", magang.DeleteUsers)
 
 	// --------------------------------------------
 	// @ Public routes

@@ -150,6 +150,17 @@ type Ticket struct {
 	Place    *Place   `gorm:"foreignKey:PlacesID;refrences:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
+type TestUser struct {
+	ID       uint64 `gorm:"primaryKey;autoIncrement"`
+	Name     string `gorm:"type:varchar(255);not null"`
+	Email    string `gorm:"type:varchar(255);not null;uniqueIndex"`
+	Password string `gorm:"type:varchar(255);not null"`
+}
+
+func (TestUser) TableName() string {
+	return "test_users"
+}
+
 func (Ticket) TableName() string {
 	return "tickets"
 }

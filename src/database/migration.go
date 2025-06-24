@@ -67,6 +67,7 @@ func MigrateDB() {
 	}
 
 	err := db.AutoMigrate(
+		&models.TestUser{},
 		&models.Role{},
 		&models.User{},
 		&models.TempTickets{},

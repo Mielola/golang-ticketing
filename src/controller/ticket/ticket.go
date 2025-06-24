@@ -125,6 +125,7 @@ func CheckTicketsDeadline(c *gin.Context) {
 func GetAllTickets(c *gin.Context) {
 	DB := database.GetDB()
 	var tickets []models.Ticket
+
 	if err := DB.Preload("Category").
 		Preload("User").
 		Preload("Place").
@@ -962,6 +963,7 @@ func ImportTicketsArray(c *gin.Context) {
 		Subject         string  `json:"subject" binding:"required"`
 		Status          string  `json:"status" binding:"required"`
 		PIC             *string `json:"PIC"`
+		PlacesID        *uint64 `json:"places_id"`
 		DetailKendala   string  `json:"detail_kendala" binding:"required"`
 		ResponDiberikan string  `json:"respon_diberikan" binding:"required"`
 		NoWhatsapp      *string `json:"no_whatsapp"`
@@ -995,6 +997,7 @@ func ImportTicketsArray(c *gin.Context) {
 	}
 
 	var importedTickets []models.Ticket
+	var ticketHistories []map[string]interface{}
 
 	for _, item := range inputJSON {
 		hariMasuk, _ := time.Parse("2006-01-02", item.HariMasuk)
@@ -1013,6 +1016,7 @@ func ImportTicketsArray(c *gin.Context) {
 			CategoryId:      item.CategoryId,
 			Subject:         item.Subject,
 			PIC:             getStringValue(item.PIC),
+			PlacesID:        item.PlacesID,
 			DetailKendala:   item.DetailKendala,
 			ResponDiberikan: item.ResponDiberikan,
 			Status:          item.Status,
@@ -1025,29 +1029,39 @@ func ImportTicketsArray(c *gin.Context) {
 			TrackingID:      generateTrackingID(item.ProductsName),
 		}
 
-		if err := DB.Table("tickets").Create(&ticket).Error; err != nil {
-			fmt.Printf("Error adding ticket: %v\n", err)
-			continue
-		}
-
-		history := struct {
-			UserEmail string
-			NewStatus string
-			TicketsID string
-			Priority  string
-			Details   string
-		}{
-			UserEmail: ticket.UserEmail,
-			NewStatus: item.Status,
-			TicketsID: ticket.TrackingID,
-			Priority:  ticket.Priority,
-			Details:   "Membuat Tiket Baru via Excel",
-		}
-
-		DB.Table("user_tickets").Create(&history)
-
 		importedTickets = append(importedTickets, ticket)
+
+		history := map[string]interface{}{
+			"user_email": user.Email,
+			"new_status": item.Status,
+			"tickets_id": ticket.TrackingID,
+			"priority":   item.Priority,
+			"details":    "Membuat Tiket Baru via Excel",
+		}
+
+		ticketHistories = append(ticketHistories, history)
 	}
+
+	tx := DB.Begin()
+
+	if err := tx.Table("tickets").Create(&importedTickets).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to import tickets: " + err.Error(),
+		})
+		return
+	}
+
+	if err := tx.Table("user_tickets").Create(&ticketHistories).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to create ticket histories: " + err.Error(),
+		})
+		return
+	}
+	tx.Commit()
 
 	c.JSON(http.StatusCreated, types.ResponseFormat{
 		Success: true,
@@ -1406,12 +1420,12 @@ func UpdateTicket(c *gin.Context) {
 		UserEmail       string    `json:"user_email"`
 		NoWhatsapp      string    `json:"no_whatsapp"`
 		CategoryId      uint64    `json:"category_id"`
+		PlacesID        *uint64   `gorm:"index"`
 		Priority        string    `json:"priority"`
 		Status          string    `json:"status"`
 		Subject         string    `json:"subject"`
 		DetailKendala   string    `json:"detail_kendala"`
 		PIC             string    `json:"PIC"`
-		PlacesID        uint32    `json:"places_id"`
 		ResponDiberikan string    `json:"respon_diberikan,omitempty"`
 		CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
 		UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`

@@ -27,6 +27,8 @@ func SetupRoutes(r *gin.Engine) {
 	v1.POST("/login", user.SendOTP)
 	v1.POST("/register", user.Registration)
 	v1.POST("/verify-otp", user.VerifyOTP)
+	v1.POST("/resend-otp", user.ResendOTP)
+	v1.POST("/delete-otp", user.DeleteOTP)
 
 	protected_V1 := v1.Group("/")
 	protected_V1.Use(middleware.AuthMiddleware())

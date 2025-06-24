@@ -442,6 +442,129 @@ func SendOTP(c *gin.Context) {
 	})
 }
 
+func DeleteOTP(c *gin.Context) {
+	DB := database.GetDB()
+	var request struct {
+		Email string `json:"email"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Cari user berdasarkan email
+	var user types.User
+	if err := DB.Where("email = ?", request.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Email not found"})
+		return
+	}
+
+	// Hapus OTP
+	user.OTP = nil
+	user.UpdatedAt = time.Now()
+
+	if err := DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update user OTP", "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "OTP deleted successfully",
+	})
+}
+
+func ResendOTP(c *gin.Context) {
+	DB := database.GetDB()
+	var request struct {
+		Email string `json:"email"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Cari user berdasarkan email
+	var user types.User
+	if err := DB.Where("email = ?", request.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Email not found"})
+		return
+	}
+
+	// Generate OTP baru
+	otp := generateOTP()
+	user.OTP = &otp
+	user.UpdatedAt = time.Now()
+
+	// Template email
+	htmlTemplate := `<!DOCTYPE html>
+	<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>OTP Verification</title>
+		<style>
+			body { font-family: 'Arial', sans-serif; background-color: #f4f4f9; color: #333; }
+			.container { width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+			h1 { color: #5A9D5E; text-align: center; }
+			p { font-size: 16px; text-align: center; }
+			.otp { font-size: 24px; font-weight: bold; color: #5A9D5E; text-align: center; margin: 20px 0; }
+			.footer { text-align: center; font-size: 12px; color: #777; margin-top: 20px; }
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>Resend OTP</h1>
+			<p>Your new One-Time Password (OTP) is:</p>
+			<div class="otp">{{.otp}}</div>
+			<p>Please use this OTP to complete your login process. This OTP is valid for 10 minutes.</p>
+			<div class="footer">
+				<p>Thank you for using our service!</p>
+			</div>
+		</div>
+	</body>
+	</html>`
+
+	tmpl, err := template.New("email").Parse(htmlTemplate)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to parse email template : " + err.Error(),
+		})
+		return
+	}
+
+	data := map[string]string{"otp": otp}
+	var bodyBuffer bytes.Buffer
+	if err := tmpl.Execute(&bodyBuffer, data); err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to execute email template : " + err.Error(),
+		})
+		return
+	}
+
+	if err := email.SendEmail(c, user.Email, "Resend OTP", bodyBuffer.String()); err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: "Failed to send OTP email : " + err.Error(),
+		})
+		return
+	}
+
+	if err := DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update user OTP", "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "OTP resent to email",
+	})
+}
+
 // @POST Verify OTP
 func VerifyOTP(c *gin.Context) {
 	DB := database.GetDB()

@@ -10,7 +10,7 @@ import (
 
 func SendEmail(c *gin.Context, to string, subject string, body string) error {
 	mailer := gomail.NewMessage()
-	mailer.SetHeader("From", "mwildab15@gmail.com")
+	mailer.SetHeader("From", "support@adhivasindo.co.id")
 	mailer.SetHeader("To", to)
 	mailer.SetHeader("Subject", subject)
 
@@ -19,8 +19,8 @@ func SendEmail(c *gin.Context, to string, subject string, body string) error {
 	dialer := gomail.NewDialer(
 		"smtp.gmail.com",
 		587,
-		"mwildab15@gmail.com",
-		"disj jbkr dwia jhtm",
+		"support@adhivasindo.co.id",
+		"ofeo pdkr hrfa xmjq",
 	)
 
 	if err := dialer.DialAndSend(mailer); err != nil {

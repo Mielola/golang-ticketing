@@ -20,11 +20,22 @@ import (
 
 func SetupRoutes(r *gin.Engine) {
 	v1 := r.Group("/api/V1")
+	vMagang := r.Group("magang")
+	// --------------------------------------------
+	// @ Test Routes
+	// --------------------------------------------
 
-	testMagang := v1.Group("/magang")
-	testMagang.GET("/users", magang.GetAllUsers)
-	testMagang.POST("/create-users", magang.CreateUsers)
-	testMagang.DELETE("/users/:id", magang.DeleteUsers)
+	testMagang := vMagang.Group("/")
+	testMagang.POST("/login", magang.Login)
+	testMagang.POST("/register", magang.CreateUsers)
+
+	protectedMagang := vMagang.Group("/")
+	protectedMagang.Use(middleware.MagangMiddleware())
+
+	protectedMagang.GET("/users", magang.GetAllUsers)
+
+	// testMagang.POST("/create-users", magang.CreateUsers)
+	// testMagang.DELETE("/users/:id", magang.DeleteUsers)
 
 	// --------------------------------------------
 	// @ Public routes

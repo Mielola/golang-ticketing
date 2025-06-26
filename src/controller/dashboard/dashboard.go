@@ -20,6 +20,7 @@ func GetDashboard(c *gin.Context) {
 	if err := DB.Table("tickets").
 		Select(`
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
+			COUNT(CASE WHEN status = 'Hold' THEN 1 END) as hold_tickets,
 			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
 			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
 			COUNT(CASE WHEN priority = 'Critical' THEN 1 END) as critical_tickets,

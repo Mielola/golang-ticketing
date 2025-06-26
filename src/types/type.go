@@ -96,6 +96,7 @@ type TicketsCreator struct {
 
 type TicketsResponse struct {
 	OpenTickets     int `json:"open_tickets"`
+	HoldTickets     int `json:"hold_tickets"`
 	PendingTickets  int `json:"pending_tickets"`
 	ResolvedTickets int `json:"resolved_tickets"`
 	TotalTickets    int `json:"total_tickets"`

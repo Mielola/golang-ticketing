@@ -36,6 +36,11 @@ func GetStatistik(c *gin.Context) {
 		Critical int `json:"critical"`
 	}
 
+	var chartReqCategory []struct {
+		Name         string `json:"name"`
+		TotalTickets int    `json:"total_tickets"`
+	}
+
 	var charUserRole []struct {
 		Role          *string `json:"role"`
 		TotalUserRole *string `json:"total_user_role"`
@@ -215,6 +220,20 @@ func GetStatistik(c *gin.Context) {
 		return
 	}
 
+	if err := DB.Table("category").
+		Select("category.category_name AS name, COUNT(tickets.id) AS total_tickets").
+		Joins("LEFT JOIN tickets ON tickets.category_id = category.id").
+		Where("category.category_name IN ?", []string{"Refund", "Relasi", "Visit", "Remote"}).
+		Group("category.category_name").
+		Scan(&chartReqCategory).Error; err != nil {
+
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
 	priorityItems := []PriorityItem{
 		{Label: "Low", Value: chartPriority.Low},
 		{Label: "Medium", Value: chartPriority.Medium},
@@ -258,6 +277,7 @@ func GetStatistik(c *gin.Context) {
 			"ChartUserResolved":   chartUserResolved,
 			"ChartTicketProducts": chartTicketProducts,
 			"ChartPlaces":         placesItems,
+			"ChartReqCategory":    chartReqCategory,
 		},
 	})
 }
@@ -343,6 +363,7 @@ func GetStatistikByPlace(c *gin.Context) {
 	if err := DB.Table("tickets").
 		Select(`
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
+			COUNT(CASE WHEN status = 'Hold' THEN 1 END) as hold_tickets,
 			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
 			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
 			COUNT(CASE WHEN priority = 'Critical' THEN 1 END) as critical_tickets,
@@ -519,6 +540,7 @@ func GetStatistikByCategory(c *gin.Context) {
 	if err := DB.Table("tickets").
 		Select(`
 			COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
+			COUNT(CASE WHEN status = 'Hold' THEN 1 END) as hold_tickets,
 			COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
 			COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
 			COUNT(CASE WHEN priority = 'Critical' THEN 1 END) as critical_tickets,

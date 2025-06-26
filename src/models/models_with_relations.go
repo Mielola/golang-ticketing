@@ -107,6 +107,15 @@ func (Category) TableName() string {
 	return "category"
 }
 
+type CategoryResolved struct {
+	ID   uint64 `gorm:"primaryKey;autoIncrement"`
+	Name string `gorm:"type:varchar(100);not null;uniqueIndex"`
+}
+
+func (CategoryResolved) TableName() string {
+	return "category_resolved"
+}
+
 // Product represents products table
 type Product struct {
 	ID   uint64 `gorm:"primaryKey;autoIncrement"`
@@ -122,32 +131,35 @@ func (Product) TableName() string {
 
 // Ticket represents tickets table
 type Ticket struct {
-	ID              uint64     `gorm:"primaryKey;autoIncrement"`
-	TrackingID      string     `gorm:"type:varchar(100);uniqueIndex;not null"`
-	HariMasuk       time.Time  `gorm:"type:date;not null"`
-	WaktuMasuk      string     `gorm:"type:TIME;not null"`
-	HariRespon      *time.Time `gorm:"type:date;default:null"`
-	WaktuRespon     string     `gorm:"type:TIME;default:null"`
-	SolvedTime      string     `gorm:"type:varchar(100);default:null"`
-	UserName        string     `gorm:"type:varchar(255);not null"`
-	UserEmail       string     `gorm:"type:varchar(255);not null;index"`
-	NoWhatsapp      string     `gorm:"type:varchar(20);default:null"`
-	CategoryId      uint64     `gorm:"not null; index"`
-	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
-	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
-	PlacesID        *uint64    `gorm:"index"`
-	Status          string     `gorm:"type:enum('New','On Progress','Resolved');default:'New';not null"`
-	Subject         string     `gorm:"type:varchar(255);not null"`
-	DetailKendala   string     `gorm:"type:text;not null"`
-	PIC             string     `gorm:"column:PIC;type:varchar(255);default:null"`
-	ResponDiberikan string     `gorm:"type:text;default:null"`
-	CreatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
-	UpdatedAt       *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
+	ID                 uint64     `gorm:"primaryKey;autoIncrement"`
+	TrackingID         string     `gorm:"type:varchar(100);uniqueIndex;not null"`
+	HariMasuk          time.Time  `gorm:"type:date;not null"`
+	WaktuMasuk         string     `gorm:"type:TIME;not null"`
+	HariRespon         *time.Time `gorm:"type:date;default:null"`
+	WaktuRespon        string     `gorm:"type:TIME;default:null"`
+	SolvedTime         string     `gorm:"type:varchar(100);default:null"`
+	UserName           string     `gorm:"type:varchar(255);not null"`
+	UserEmail          string     `gorm:"type:varchar(255);not null;index"`
+	NoWhatsapp         string     `gorm:"type:varchar(20);default:null"`
+	CategoryId         uint64     `gorm:"not null; index"`
+	CategoryResolvedId uint64     `gorm:"default:null"`
+	NoteResolved       string     `gorm:"type:text;default:null"`
+	ProductsName       string     `gorm:"type:varchar(255);not null;index"`
+	Priority           string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
+	PlacesID           *uint64    `gorm:"index"`
+	Status             string     `gorm:"type:enum('New', 'Hold', On Progress','Resolved');default:'New';not null"`
+	Subject            string     `gorm:"type:varchar(255);not null"`
+	DetailKendala      string     `gorm:"type:text;not null"`
+	PIC                string     `gorm:"column:PIC;type:varchar(255);default:null"`
+	ResponDiberikan    string     `gorm:"type:text;default:null"`
+	CreatedAt          *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
+	UpdatedAt          *time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"`
 
-	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Place    *Place   `gorm:"foreignKey:PlacesID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	Category         Category         `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	CategoryResolved CategoryResolved `gorm:"foreignKey:CategoryResolvedId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	User             User             `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Product          Product          `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Place            *Place           `gorm:"foreignKey:PlacesID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
 type TestUser struct {
@@ -178,7 +190,7 @@ type TempTickets struct {
 	CategoryId      uint64     `gorm:"not null; index"`
 	ProductsName    string     `gorm:"type:varchar(255);not null;index"`
 	Priority        string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
-	Status          string     `gorm:"type:enum('New','On Progress','Resolved');default:'New';not null"`
+	Status          string     `gorm:"type:enum('New','Hold','On Progress','Resolved');default:'New';not null"`
 	Subject         string     `gorm:"type:varchar(255);not null"`
 	DetailKendala   string     `gorm:"type:text;not null"`
 	PIC             string     `gorm:"column:PIC;type:varchar(255);default:null"`

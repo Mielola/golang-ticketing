@@ -405,7 +405,7 @@ func SendOTP(c *gin.Context) {
 			<h1>OTP Verification</h1>
 			<p>Your One-Time Password (OTP) for login is:</p>
 			<div class="otp">{{.otp}}</div>
-			<p>Please use this OTP to complete your login process. This OTP is valid for 10 minutes.</p>
+			<p>Please use this OTP to complete your login process. This OTP is valid for 1 minutes.</p>
 			<div class="footer">
 				<p>Thank you for using our service!</p>
 			</div>
@@ -519,7 +519,7 @@ func ResendOTP(c *gin.Context) {
 			<h1>Resend OTP</h1>
 			<p>Your new One-Time Password (OTP) is:</p>
 			<div class="otp">{{.otp}}</div>
-			<p>Please use this OTP to complete your login process. This OTP is valid for 10 minutes.</p>
+			<p>Please use this OTP to complete your login process. This OTP is valid for 1 minutes.</p>
 			<div class="footer">
 				<p>Thank you for using our service!</p>
 			</div>

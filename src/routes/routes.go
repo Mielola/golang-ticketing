@@ -20,16 +20,16 @@ import (
 
 func SetupRoutes(r *gin.Engine) {
 	v1 := r.Group("/api/V1")
-	vMagang := r.Group("magang")
+	v2 := r.Group("/api/V2")
 	// --------------------------------------------
 	// @ Test Routes
 	// --------------------------------------------
 
-	testMagang := vMagang.Group("/")
+	testMagang := v2.Group("/magang")
 	testMagang.POST("/login", magang.Login)
 	testMagang.POST("/register", magang.CreateUsers)
 
-	protectedMagang := vMagang.Group("/")
+	protectedMagang := v2.Group("/")
 	protectedMagang.Use(middleware.MagangMiddleware())
 
 	protectedMagang.GET("/users", magang.GetAllUsers)
@@ -147,4 +147,6 @@ func SetupRoutes(r *gin.Engine) {
 
 	// Statistik
 	protected_V1.POST("/statistik", statistik.GetStatistik)
+	protected_V1.POST("/statistik/places", statistik.GetStatistikByPlace)
+	protected_V1.POST("/statistik/category", statistik.GetStatistikByCategory)
 }

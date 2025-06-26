@@ -147,7 +147,7 @@ type Ticket struct {
 	Category Category `gorm:"foreignKey:CategoryId;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	User     User     `gorm:"foreignKey:UserEmail;references:Email;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Product  Product  `gorm:"foreignKey:ProductsName;references:Name;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Place    *Place   `gorm:"foreignKey:PlacesID;refrences:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	Place    *Place   `gorm:"foreignKey:PlacesID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
 type TestUser struct {

@@ -65,6 +65,7 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.GET("/tickets", ticket.GetAllTickets)
 	protected_V1.POST("/tickets/:tracking_id", ticket.UpdateTicket)
 	protected_V1.POST("/ticket-status/:tracking_id", ticket.UpdateStatus)
+	protected_V1.POST("/tickets-resolved/:tracking_id", ticket.ResolvedTicket)
 	protected_V1.GET("/check-tickets-deadline", ticket.CheckTicketsDeadline)
 	protected_V1.POST("/report", ticket.GenerateReport)
 	protected_V1.GET("/tickets/:tracking_id", ticket.GetTicketByID)

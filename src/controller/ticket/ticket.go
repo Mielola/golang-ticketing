@@ -3,10 +3,11 @@ package ticket
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"my-gin-project/src/database"
 	"my-gin-project/src/models"
@@ -1071,18 +1072,21 @@ func ImportTicketsArray(c *gin.Context) {
 }
 
 func generateTrackingID(productName string) string {
+	// Membuat prefix dari inisial nama produk
 	words := strings.Fields(productName)
 	var prefix string
 	for _, word := range words {
 		prefix += strings.ToUpper(string(word[0]))
 	}
 
+	// Format tanggal: YYMMDD
 	tanggal := time.Now().Format("060102")
 
-	abjad := string('A' + byte(rand.Intn(26)))
+	// Ambil 6 karakter pertama dari UUID (cukup unik)
+	uuidPart := strings.ToUpper(uuid.New().String()[:6])
 
-	nomorAcak := fmt.Sprintf("%03d", rand.Intn(1000))
-	trackingID := fmt.Sprintf("%s-%s%s-%s", prefix, tanggal[:3], abjad, nomorAcak)
+	// Format akhir
+	trackingID := fmt.Sprintf("%s-%s-%s", prefix, tanggal, uuidPart)
 	return trackingID
 }
 
@@ -1338,6 +1342,132 @@ func UpdateStatus(c *gin.Context) {
 		TicketsID: c.Param("tracking_id"),
 		Priority:  ticket.Priority,
 		Details:   "Mengubah Status Tickets",
+	}
+
+	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := DB.Table("user_tickets").Create(&saveHistory).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Status updated successfully",
+		Data:    ticket,
+	})
+}
+
+// @POST
+func ResolvedTicket(c *gin.Context) {
+	DB := database.GetDB()
+
+	var input struct {
+		Status             string `json:"status" binding:"required"`
+		CategoryResolvedId uint64 `json:"category_resolved_id" binding:"required"`
+		NoteResolved       string `json:"note_resolved" binding:"required"`
+	}
+
+	// @Bind JSON
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user struct {
+		Email string `json:"email"`
+	}
+
+	// @GET Token from Header
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "Token is Required",
+		})
+		return
+	}
+
+	// @GET User Email from Token
+	if err := DB.Table("users").Select("email").Where("token = ?", token).First(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, types.ResponseFormat{
+			Success: false,
+			Message: "User Not Found",
+		})
+		return
+	}
+
+	// @GET Ticket from Database
+	var ticket struct {
+		ID                 uint      `gorm:"primaryKey" json:"id"`
+		TrackingID         string    `json:"tracking_id"`
+		ProductsName       string    `json:"products_name"`
+		HariMasuk          time.Time `json:"hari_masuk"`
+		WaktuMasuk         string    `json:"waktu_masuk"`
+		HariRespon         time.Time `json:"hari_respon,omitempty"`
+		WaktuRespon        string    `json:"waktu_respon,omitempty"`
+		UserName           string    `json:"user_name,omitempty"`
+		UserEmail          string    `json:"user_email"`
+		NoWhatsapp         string    `json:"no_whatsapp"`
+		Priority           string    `json:"priority"`
+		CategoryResolvedId uint64    `json:"category_resolved_id"`
+		NoteResolved       string    `json:"note_resolved"`
+		Status             string    `json:"status"`
+		Subject            string    `json:"subject"`
+		DetailKendala      string    `json:"detail_kendala"`
+		PIC                string    `json:"PIC"`
+		ResponDiberikan    string    `json:"respon_diberikan,omitempty"`
+		CreatedAt          time.Time `gorm:"autoCreateTime" json:"created_at"`
+		UpdatedAt          time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+		SolvedTime         *string   `json:"solved_time,omitempty"`
+	}
+	if err := DB.Table("tickets").Where("tracking_id = ?", c.Param("tracking_id")).First(&ticket).Error; err != nil {
+		c.JSON(http.StatusNotFound, types.ResponseFormat{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if input.Status == "Resolved" {
+		startTime := ticket.CreatedAt
+		endTime := time.Now()
+
+		// Hitung selisih waktu (durasi penyelesaian)
+		duration := endTime.Sub(startTime)
+
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+		seconds := int(duration.Seconds()) % 60
+
+		var time struct {
+			SolvedTime string `json:"solved_time"`
+		}
+		time.SolvedTime = fmt.Sprintf("%d hours %d minutes %d seconds", hours, minutes, seconds)
+		ticket.SolvedTime = &time.SolvedTime
+	} else {
+		ticket.SolvedTime = nil
+	}
+
+	ticket.Status = input.Status
+	ticket.CategoryResolvedId = input.CategoryResolvedId
+	ticket.NoteResolved = input.NoteResolved
+
+	saveHistory := types.UserTicketHistory{
+		UserEmail: user.Email,
+		NewStatus: input.Status,
+		TicketsID: c.Param("tracking_id"),
+		Priority:  ticket.Priority,
+		Details:   input.NoteResolved,
 	}
 
 	if err := DB.Table("tickets").Save(&ticket).Error; err != nil {

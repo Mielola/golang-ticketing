@@ -1497,6 +1497,7 @@ func ResolvedTicket(c *gin.Context) {
 func UpdateTicket(c *gin.Context) {
 	DB := database.GetDB()
 	var input struct {
+		Subject         string    `json:"subject"`
 		ProductsName    string    `json:"products_name"`
 		CategoryId      int       `json:"category_id"`
 		NoWhatsapp      string    `json:"no_whatsapp"`

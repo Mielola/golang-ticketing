@@ -150,4 +150,5 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.POST("/statistik", statistik.GetStatistik)
 	protected_V1.POST("/statistik/places", statistik.GetStatistikByPlace)
 	protected_V1.POST("/statistik/category", statistik.GetStatistikByCategory)
+	protected_V1.POST("/statistik/user", statistik.GetStatistikByUser)
 }

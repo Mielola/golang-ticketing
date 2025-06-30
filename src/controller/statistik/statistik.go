@@ -459,6 +459,190 @@ func GetStatistikByPlace(c *gin.Context) {
 	})
 }
 
+func GetStatistikByUser(c *gin.Context) {
+	DB := database.GetDB()
+
+	var input struct {
+		Name        string `json:"name" binding:"required"`
+		ProductName string `json:"product_name" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid JSON",
+			"data":    nil,
+		})
+		return
+	}
+
+	var user models.User
+	if err := DB.Where("name = ?", input.Name).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "User not found",
+			"data":    nil,
+		})
+		return
+	}
+
+	var tickets []models.Ticket
+	if err := DB.Preload("Category").
+		Preload("User").
+		Preload("Place").
+		Order("tickets.created_at DESC").
+		Where("tickets.user_email = ? AND tickets.products_name = ?", user.Email, input.ProductName).
+		Find(&tickets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	// baseURL
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s/storage/images/", scheme, c.Request.Host)
+
+	// userMap
+	userMap := make(map[string]models.User)
+	for _, t := range tickets {
+		userMap[t.UserEmail] = t.User
+	}
+
+	// collect tracking ids
+	var trackingIDs []string
+	for _, t := range tickets {
+		trackingIDs = append(trackingIDs, t.TrackingID)
+	}
+
+	// last replies
+	var lastRepliesRaw []struct {
+		TicketsID string
+		UserEmail string
+		NewStatus string
+		UpdateAt  time.Time
+	}
+	DB.Raw(`
+        SELECT ut.*
+        FROM user_tickets ut
+        INNER JOIN (
+            SELECT tickets_id, MAX(update_at) AS max_update
+            FROM user_tickets
+            WHERE tickets_id IN ?
+            GROUP BY tickets_id
+        ) latest ON ut.tickets_id = latest.tickets_id AND ut.update_at = latest.max_update
+    `, trackingIDs).Scan(&lastRepliesRaw)
+
+	var ticketStatus types.TicketsResponse
+	if err := DB.Table("tickets").
+		Select(`
+		COUNT(CASE WHEN status = 'New' THEN 1 END) as open_tickets,
+		COUNT(CASE WHEN status = 'Hold' THEN 1 END) as hold_tickets,
+		COUNT(CASE WHEN status = 'On Progress' THEN 1 END) as pending_tickets,
+		COUNT(CASE WHEN status = 'Resolved' THEN 1 END) as resolved_tickets,
+		COUNT(CASE WHEN priority = 'Critical' THEN 1 END) as critical_tickets,
+		COUNT("*") as total_tickets
+	`).
+		Where("user_email = ? AND products_name = ?", user.Email, input.ProductName).
+		Scan(&ticketStatus).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to get dashboard data", "error": err.Error()})
+		return
+	}
+
+	lastReplyMap := make(map[string]struct {
+		UserEmail string
+		NewStatus string
+		UpdateAt  time.Time
+	})
+	lastReplyEmails := make(map[string]bool)
+	for _, r := range lastRepliesRaw {
+		lastReplyMap[r.TicketsID] = struct {
+			UserEmail string
+			NewStatus string
+			UpdateAt  time.Time
+		}{r.UserEmail, r.NewStatus, r.UpdateAt}
+		if r.UserEmail != "" {
+			lastReplyEmails[r.UserEmail] = true
+		}
+	}
+
+	var lastRepliers []models.User
+	if len(lastReplyEmails) > 0 {
+		var emails []string
+		for e := range lastReplyEmails {
+			emails = append(emails, e)
+		}
+		DB.Where("email IN ?", emails).Find(&lastRepliers)
+	}
+
+	lastReplierMap := make(map[string]models.User)
+	for _, user := range lastRepliers {
+		if user.Avatar != "" {
+			user.Avatar = baseURL + user.Avatar
+		}
+		lastReplierMap[user.Email] = user
+	}
+
+	// Format response
+	var formattedTickets []map[string]interface{}
+	for _, ticket := range tickets {
+		ticketCreator := userMap[ticket.UserEmail]
+		if ticketCreator.Avatar != "" {
+			ticketCreator.Avatar = baseURL + ticketCreator.Avatar
+		}
+
+		var lastReplier *models.User
+		if lr, ok := lastReplyMap[ticket.TrackingID]; ok {
+			if user, ok := lastReplierMap[lr.UserEmail]; ok {
+				lastReplier = &user
+			}
+		}
+
+		formatted := map[string]interface{}{
+			"id":            ticket.ID,
+			"tracking_id":   ticket.TrackingID,
+			"products_name": ticket.ProductsName,
+			"hari_masuk":    ticket.HariMasuk.Format("2006-01-02"),
+			"waktu_masuk":   ticket.WaktuMasuk,
+			"solved_time":   ticket.SolvedTime,
+			"user":          ticketCreator,
+			"last_replier":  lastReplier,
+			"category":      ticket.Category.CategoryName,
+			"priority":      ticket.Priority,
+			"places_id":     ticket.PlacesID,
+			"places_name": func() string {
+				if ticket.Place != nil {
+					return ticket.Place.Name
+				}
+				return "Not Found"
+			}(),
+			"status":         ticket.Status,
+			"subject":        ticket.Subject,
+			"no_whatsapp":    ticket.NoWhatsapp,
+			"detail_kendala": ticket.DetailKendala,
+			"pic":            ticket.PIC,
+			"created_date":   ticket.CreatedAt.Format("2006-01-02"),
+			"created_time":   ticket.CreatedAt.Format("15:04:05"),
+			"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
+		}
+		formattedTickets = append(formattedTickets, formatted)
+	}
+
+	c.JSON(http.StatusOK, types.ResponseFormat{
+		Success: true,
+		Message: "Tickets retrieved successfully",
+		Data: gin.H{
+			"tickets": formattedTickets,
+			"sumary":  ticketStatus,
+		},
+	})
+}
+
 func GetStatistikByCategory(c *gin.Context) {
 	DB := database.GetDB()
 

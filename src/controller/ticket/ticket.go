@@ -276,7 +276,7 @@ func GetTicketsLogs(c *gin.Context) {
 		NewStatus      string         `json:"new_status"`
 		Priority       string         `json:"priority"`
 		Details        string         `json:"details"`
-		UpdateAt       time.Time      `json:"update_at"`
+		UpdateAt       string         `json:"update_at"`
 		UpdateAtString string         `json:"update_at_string"`
 		User           TicketsCreator `json:"user"`
 	}
@@ -324,8 +324,8 @@ func GetTicketsLogs(c *gin.Context) {
 			NewStatus:      ut.NewStatus,
 			Priority:       ut.Priority,
 			Details:        ut.Details,
-			UpdateAt:       ut.UpdateAt,
-			UpdateAtString: updateAtStr,
+			UpdateAt:       updateAtStr,
+			UpdateAtString: ut.UpdateAt.Format("2006-01-02"),
 			User: TicketsCreator{
 				Email:  ut.User.Email,
 				Name:   ut.User.Name,

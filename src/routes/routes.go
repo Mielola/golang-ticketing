@@ -2,6 +2,7 @@ package routes
 
 import (
 	"my-gin-project/src/controller/category"
+	categoryresolved "my-gin-project/src/controller/category_resolved"
 	"my-gin-project/src/controller/dashboard"
 	"my-gin-project/src/controller/export"
 	"my-gin-project/src/controller/magang"
@@ -145,6 +146,9 @@ func SetupRoutes(r *gin.Engine) {
 	protected_V1.POST("/category", category.CreateCategory)
 	protected_V1.POST("/category/:id", category.UpdateCategory)
 	protected_V1.DELETE("/category/:id", category.DeleteCategory)
+
+	// Category Resolved
+	protected_V1.GET("/category-resolved", categoryresolved.GetResolvedCategory)
 
 	// Statistik
 	protected_V1.POST("/statistik", statistik.GetStatistik)

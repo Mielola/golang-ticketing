@@ -609,14 +609,15 @@ func GenerateReport(c *gin.Context) {
 	DB := database.GetDB()
 
 	var input struct {
-		ProductsName string  `json:"products_name" binding:"required"`
-		PlacesID     *string `json:"places_id"`
-		CategoryID   string  `json:"category_id"`
-		StartDate    string  `json:"start_date" binding:"required"`
-		EndDate      string  `json:"end_date" binding:"required"`
-		Status       string  `json:"status" binding:"required"`
-		StartTime    string  `json:"start_time" binding:"required"`
-		EndTime      string  `json:"end_time" binding:"required"`
+		ProductsName       string  `json:"products_name" binding:"required"`
+		PlacesID           *string `json:"places_id"`
+		CategoryID         string  `json:"category_id"`
+		CategoryResolvedID string  `json:"category_resolved_id"`
+		StartDate          string  `json:"start_date" binding:"required"`
+		EndDate            string  `json:"end_date" binding:"required"`
+		Status             string  `json:"status" binding:"required"`
+		StartTime          string  `json:"start_time" binding:"required"`
+		EndTime            string  `json:"end_time" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -647,14 +648,15 @@ func GenerateReport(c *gin.Context) {
 	}
 
 	var tickets []struct {
-		TrackingID      string    `json:"tracking_id"`
-		CreatedAt       time.Time `json:"created_at"`
-		Subject         string    `json:"subject"`
-		HariMasuk       time.Time `json:"hari_masuk"`
-		WaktuMasuk      string    `json:"waktu_masuk"`
-		CategoryName    string    `json:"category_name"`
-		PlacesName      *string   `json:"places_name"`
-		ResponDiberikan string    `json:"respon_diberikan"`
+		TrackingID           string    `json:"tracking_id"`
+		CreatedAt            time.Time `json:"created_at"`
+		Subject              string    `json:"subject"`
+		HariMasuk            time.Time `json:"hari_masuk"`
+		WaktuMasuk           string    `json:"waktu_masuk"`
+		CategoryName         string    `json:"category_name"`
+		PlacesName           *string   `json:"places_name"`
+		ResponDiberikan      string    `json:"respon_diberikan"`
+		CategoryResolvedName *string   `json:"category_resolved_name"`
 	}
 
 	var chartPriority struct {
@@ -724,14 +726,20 @@ func GenerateReport(c *gin.Context) {
 
 	// Dynamic Query
 	filters := DB.Table("tickets").
-		Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan, places.name AS places_name").
+		Select("tickets.tracking_id, tickets.created_at, tickets.subject, tickets.hari_masuk, tickets.waktu_masuk, category.category_name, tickets.respon_diberikan, places.name AS places_name, category_resolved.name AS category_resolved_name").
 		Joins("LEFT JOIN category ON tickets.category_id = category.id").
 		Joins("LEFT JOIN places ON tickets.places_id = places.id").
+		Joins("LEFT JOIN category_resolved ON tickets.category_resolved_id = category_resolved.id").
 		Where("tickets.created_at BETWEEN ? AND ? AND products_name = ?", startDateTime, endDateTime, input.ProductsName)
 
 	// Jika status tidak "all"
 	if strings.ToLower(input.Status) != "all" {
 		filters = filters.Where("tickets.status = ?", input.Status)
+	}
+
+	// Jika category_resolved_id tidak "all" dan tidak kosong
+	if strings.ToLower(input.CategoryResolvedID) != "all" && input.CategoryResolvedID != "" {
+		filters = filters.Where("tickets.category_resolved_id = ?", input.CategoryResolvedID)
 	}
 
 	// Jika places_id tidak "all" dan tidak kosong
@@ -778,15 +786,21 @@ func GenerateReport(c *gin.Context) {
 
 	formattedTickets := make([]map[string]interface{}, 0)
 	for _, ticket := range tickets {
+		categoryResolvedName := ticket.CategoryResolvedName
+		if categoryResolvedName == nil || *categoryResolvedName == "" {
+			categoryResolvedName = new(string)
+			*categoryResolvedName = "On Progress"
+		}
 		formattedTickets = append(formattedTickets, map[string]interface{}{
-			"tracking_id":   ticket.TrackingID,
-			"created_at":    ticket.CreatedAt.Format("2006-01-02 15:04:05"),
-			"subject":       ticket.Subject,
-			"respon_admin":  ticket.ResponDiberikan,
-			"hari_masuk":    ticket.HariMasuk.Format("2006-01-02"),
-			"waktu_masuk":   ticket.WaktuMasuk,
-			"category_name": ticket.CategoryName,
-			"places_name":   ticket.PlacesName,
+			"tracking_id":            ticket.TrackingID,
+			"created_at":             ticket.CreatedAt.Format("2006-01-02 15:04:05"),
+			"subject":                ticket.Subject,
+			"respon_admin":           ticket.ResponDiberikan,
+			"hari_masuk":             ticket.HariMasuk.Format("2006-01-02"),
+			"waktu_masuk":            ticket.WaktuMasuk,
+			"category_name":          ticket.CategoryName,
+			"places_name":            ticket.PlacesName,
+			"category_resolved_name": *categoryResolvedName,
 		})
 	}
 
@@ -1223,21 +1237,23 @@ func GetTicketByID(c *gin.Context) {
 			Name:   ticket.User.Name,
 			Avatar: ticket.User.Avatar,
 		},
-		"last_replier":   lastReplier,
-		"place_id":       ticket.PlacesID,
-		"category_id":    ticket.CategoryId,
-		"category":       ticket.Category.CategoryName,
-		"priority":       ticket.Priority,
-		"status":         ticket.Status,
-		"subject":        ticket.Subject,
-		"no_whatsapp":    ticket.NoWhatsapp,
-		"detail_kendala": ticket.DetailKendala,
-		"pic":            ticket.PIC,
-		"created_date":   ticket.CreatedAt.Format("2006-01-02"),
-		"created_time":   ticket.CreatedAt.Format("15:04:05"),
-		"updated_at":     ticket.UpdatedAt.Format("2006-01-02"),
-		"history":        formattedLogs,
-		"respon_admin":   ticket.ResponDiberikan,
+		"last_replier":         lastReplier,
+		"place_id":             ticket.PlacesID,
+		"note_resolved":        ticket.NoteResolved,
+		"category_resolved_id": ticket.CategoryResolvedId,
+		"category_id":          ticket.CategoryId,
+		"category":             ticket.Category.CategoryName,
+		"priority":             ticket.Priority,
+		"status":               ticket.Status,
+		"subject":              ticket.Subject,
+		"no_whatsapp":          ticket.NoWhatsapp,
+		"detail_kendala":       ticket.DetailKendala,
+		"pic":                  ticket.PIC,
+		"created_date":         ticket.CreatedAt.Format("2006-01-02"),
+		"created_time":         ticket.CreatedAt.Format("15:04:05"),
+		"updated_at":           ticket.UpdatedAt.Format("2006-01-02"),
+		"history":              formattedLogs,
+		"respon_admin":         ticket.ResponDiberikan,
 	}
 
 	c.JSON(http.StatusOK, types.ResponseFormat{
@@ -1372,10 +1388,11 @@ func ResolvedTicket(c *gin.Context) {
 	DB := database.GetDB()
 
 	var input struct {
-		Status             string `json:"status" binding:"required"`
 		CategoryResolvedId uint64 `json:"category_resolved_id" binding:"required"`
 		NoteResolved       string `json:"note_resolved" binding:"required"`
 	}
+
+	status := "Resolved"
 
 	// @Bind JSON
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -1438,7 +1455,7 @@ func ResolvedTicket(c *gin.Context) {
 		return
 	}
 
-	if input.Status == "Resolved" {
+	if status == "Resolved" {
 		startTime := ticket.CreatedAt
 		endTime := time.Now()
 
@@ -1458,13 +1475,13 @@ func ResolvedTicket(c *gin.Context) {
 		ticket.SolvedTime = nil
 	}
 
-	ticket.Status = input.Status
+	ticket.Status = status
 	ticket.CategoryResolvedId = input.CategoryResolvedId
 	ticket.NoteResolved = input.NoteResolved
 
 	saveHistory := types.UserTicketHistory{
 		UserEmail: user.Email,
-		NewStatus: input.Status,
+		NewStatus: status,
 		TicketsID: c.Param("tracking_id"),
 		Priority:  ticket.Priority,
 		Details:   input.NoteResolved,
@@ -1497,18 +1514,20 @@ func ResolvedTicket(c *gin.Context) {
 func UpdateTicket(c *gin.Context) {
 	DB := database.GetDB()
 	var input struct {
-		Subject         string    `json:"subject"`
-		ProductsName    string    `json:"products_name"`
-		CategoryId      int       `json:"category_id"`
-		NoWhatsapp      string    `json:"no_whatsapp"`
-		PIC             string    `json:"PIC"`
-		PlacesID        uint32    `json:"places_id"`
-		DetailKendala   string    `json:"detail_kendala"`
-		ResponDiberikan string    `json:"respon_diberikan"`
-		Priority        string    `json:"priority"`
-		Status          string    `json:"status"`
-		HariMasuk       time.Time `json:"hari_masuk"`
-		WaktuMasuk      string    `json:"waktu_masuk"`
+		Subject            string    `json:"subject"`
+		ProductsName       string    `json:"products_name"`
+		CategoryId         int       `json:"category_id"`
+		NoWhatsapp         string    `json:"no_whatsapp"`
+		PIC                string    `json:"PIC"`
+		CategoryResolvedId uint64    `json:"category_resolved_id"`
+		NoteResolved       string    `json:"note_resolved"`
+		PlacesID           uint32    `json:"places_id"`
+		DetailKendala      string    `json:"detail_kendala"`
+		ResponDiberikan    string    `json:"respon_diberikan"`
+		Priority           string    `json:"priority"`
+		Status             string    `json:"status"`
+		HariMasuk          time.Time `json:"hari_masuk"`
+		WaktuMasuk         string    `json:"waktu_masuk"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1541,26 +1560,28 @@ func UpdateTicket(c *gin.Context) {
 
 	// Get updated ticket
 	var ticket struct {
-		TrackingID      string    `json:"tracking_id"`
-		ProductsName    string    `json:"products_name"`
-		HariMasuk       time.Time `json:"hari_masuk"`
-		WaktuMasuk      string    `json:"waktu_masuk"`
-		HariRespon      time.Time `json:"hari_respon,omitempty"`
-		WaktuRespon     string    `json:"waktu_respon,omitempty"`
-		UserName        string    `json:"user_name,omitempty"`
-		UserEmail       string    `json:"user_email"`
-		NoWhatsapp      string    `json:"no_whatsapp"`
-		CategoryId      uint64    `json:"category_id"`
-		PlacesID        *uint64   `gorm:"index"`
-		Priority        string    `json:"priority"`
-		Status          string    `json:"status"`
-		Subject         string    `json:"subject"`
-		DetailKendala   string    `json:"detail_kendala"`
-		PIC             string    `json:"PIC"`
-		ResponDiberikan string    `json:"respon_diberikan,omitempty"`
-		CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
-		UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
-		SolvedTime      *string   `json:"solved_time,omitempty"`
+		TrackingID         string    `json:"tracking_id"`
+		ProductsName       string    `json:"products_name"`
+		HariMasuk          time.Time `json:"hari_masuk"`
+		WaktuMasuk         string    `json:"waktu_masuk"`
+		HariRespon         time.Time `json:"hari_respon,omitempty"`
+		WaktuRespon        string    `json:"waktu_respon,omitempty"`
+		UserName           string    `json:"user_name,omitempty"`
+		UserEmail          string    `json:"user_email"`
+		NoWhatsapp         string    `json:"no_whatsapp"`
+		CategoryId         uint64    `json:"category_id"`
+		PlacesID           *uint64   `gorm:"index"`
+		CategoryResolvedId uint64    `json:"category_resolved_id"`
+		NoteResolved       string    `json:"note_resolved"`
+		Priority           string    `json:"priority"`
+		Status             string    `json:"status"`
+		Subject            string    `json:"subject"`
+		DetailKendala      string    `json:"detail_kendala"`
+		PIC                string    `json:"PIC"`
+		ResponDiberikan    string    `json:"respon_diberikan,omitempty"`
+		CreatedAt          time.Time `gorm:"autoCreateTime" json:"created_at"`
+		UpdatedAt          time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+		SolvedTime         *string   `json:"solved_time,omitempty"`
 	}
 	if err := DB.Table("tickets").
 		Select("*, category.category_name").
@@ -1575,10 +1596,13 @@ func UpdateTicket(c *gin.Context) {
 	}
 
 	// Calculate resolved time if status is Resolved
+	messageDetail := "Mengubah Data Tiket"
 	if ticket.Status == "Resolved" {
+		messageDetail = input.NoteResolved
 		duration := time.Since(ticket.CreatedAt)
 		ticket.SolvedTime = toSolvedTime(duration)
 	} else {
+		messageDetail = "Mengubah Data Tiket"
 		ticket.SolvedTime = nil
 	}
 
@@ -1600,7 +1624,7 @@ func UpdateTicket(c *gin.Context) {
 		NewStatus: ticket.Status,
 		TicketsID: ticket.TrackingID,
 		Priority:  ticket.Priority,
-		Details:   "Mengubah Data Tiket",
+		Details:   messageDetail,
 	}
 
 	if err := DB.Table("user_tickets").Create(&history).Error; err != nil {

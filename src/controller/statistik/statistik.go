@@ -36,7 +36,7 @@ func GetStatistik(c *gin.Context) {
 		Critical int `json:"critical"`
 	}
 
-	var chartReqCategory []struct {
+	var chartCategoryResolved []struct {
 		Name         string `json:"name"`
 		TotalTickets int    `json:"total_tickets"`
 	}
@@ -220,12 +220,12 @@ func GetStatistik(c *gin.Context) {
 		return
 	}
 
-	if err := DB.Table("category").
-		Select("category.category_name AS name, COUNT(tickets.id) AS total_tickets").
-		Joins("LEFT JOIN tickets ON tickets.category_id = category.id").
-		Where("category.category_name IN ?", []string{"Refund", "Relasi", "Visit", "Remote"}).
-		Group("category.category_name").
-		Scan(&chartReqCategory).Error; err != nil {
+	// Chart Category Resolved
+	if err := DB.Table("category_resolved").
+		Select("category_resolved.name as name, COUNT(tickets.tracking_id) as total_tickets").
+		Joins("LEFT JOIN tickets ON tickets.category_resolved_id = category_resolved.id AND tickets.products_name = ?", input.ProductsName).
+		Group("category_resolved.name").
+		Scan(&chartCategoryResolved).Error; err != nil {
 
 		c.JSON(http.StatusInternalServerError, types.ResponseFormat{
 			Success: false,
@@ -269,15 +269,15 @@ func GetStatistik(c *gin.Context) {
 		Success: true,
 		Message: "Report generated successfully",
 		Data: gin.H{
-			"ChartUserTickets":    userTickets,
-			"ChartTicketPeriode":  ChartUserTicketsFormatted,
-			"ChartPriority":       priorityItems,
-			"ChartCategory":       categoryItems,
-			"CharUserRole":        charUserRole,
-			"ChartUserResolved":   chartUserResolved,
-			"ChartTicketProducts": chartTicketProducts,
-			"ChartPlaces":         placesItems,
-			"ChartReqCategory":    chartReqCategory,
+			"ChartUserTickets":      userTickets,
+			"ChartTicketPeriode":    ChartUserTicketsFormatted,
+			"ChartPriority":         priorityItems,
+			"ChartCategory":         categoryItems,
+			"CharUserRole":          charUserRole,
+			"ChartUserResolved":     chartUserResolved,
+			"ChartTicketProducts":   chartTicketProducts,
+			"ChartPlaces":           placesItems,
+			"ChartCategoryResolved": chartCategoryResolved,
 		},
 	})
 }

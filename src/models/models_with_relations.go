@@ -121,7 +121,7 @@ type Product struct {
 	ID   uint64 `gorm:"primaryKey;autoIncrement"`
 	Name string `gorm:"type:varchar(100);not null;uniqueIndex"`
 
-	Categories []Category `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	Categories []Category `gorm:"foreignKey:ProductsID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
 
 // TableName specifies the table name for Product
@@ -147,7 +147,7 @@ type Ticket struct {
 	ProductsName       string     `gorm:"type:varchar(255);not null;index"`
 	Priority           string     `gorm:"type:enum('Low','Medium','High','Critical');default:'Low';not null"`
 	PlacesID           *uint64    `gorm:"index"`
-	Status             string     `gorm:"type:enum('New', 'Hold', On Progress','Resolved');default:'New';not null"`
+	Status             string     `gorm:"type:enum('New', 'Hold', 'On Progress','Resolved');default:'New';not null"`
 	Subject            string     `gorm:"type:varchar(255);not null"`
 	DetailKendala      string     `gorm:"type:text;not null"`
 	PIC                string     `gorm:"column:PIC;type:varchar(255);default:null"`

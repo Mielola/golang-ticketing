@@ -149,6 +149,7 @@ func SetupRoutes(r *gin.Engine) {
 
 	// Category Resolved
 	protected_V1.GET("/category-resolved", categoryresolved.GetResolvedCategory)
+	protected_V1.POST("/category-resolved", categoryresolved.CreateResolvedCategory)
 
 	// Statistik
 	protected_V1.POST("/statistik", statistik.GetStatistik)

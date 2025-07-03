@@ -67,19 +67,23 @@ func MigrateDB() {
 	}
 
 	err := db.AutoMigrate(
-		&models.TestUser{},
 		&models.Role{},
+		&models.TestUser{},
+
+		&models.Shift{},
+		&models.Product{},
+		&models.Place{},
+
+		&models.Category{},
+		&models.CategoryResolved{},
 		&models.User{},
+
+		&models.Ticket{},
 		&models.TempTickets{},
 		&models.TempUserTickets{},
-		&models.Shift{},
 		&models.EmployeeShift{},
 		&models.ShiftLog{},
-		&models.Category{},
-		&models.Product{},
-		&models.CategoryResolved{},
-		&models.Ticket{},
-		&models.Place{},
+
 		&models.UserLog{},
 		&models.UserTicket{},
 		&models.ExportLog{},
